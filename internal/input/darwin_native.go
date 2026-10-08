@@ -124,9 +124,9 @@ static int postMouseEvent(uint32_t eventType, double x, double y, uint32_t butto
     if (!event) {
         return -1;
     }
-    if (flags != 0) {
-        CGEventSetFlags(event, (CGEventFlags)flags);
-    }
+    // Zero is significant: clear inherited session flags on plain clicks and
+    // the final modifier key-up, otherwise Command/Control can remain latched.
+    CGEventSetFlags(event, (CGEventFlags)flags);
     // Tag event with CrossKVM marker so capture tap ignores it
     CGEventSetIntegerValueField(event, kCGEventSourceUserData, CROSSKVM_USER_DATA_MARKER);
     CGEventPost(kCGHIDEventTap, event);
@@ -158,9 +158,9 @@ static int postKeyboardEvent(uint16_t keyCode, bool keyDown, uint64_t flags) {
     if (!event) {
         return -1;
     }
-    if (flags != 0) {
-        CGEventSetFlags(event, (CGEventFlags)flags);
-    }
+    // Zero is significant: clear inherited session flags on plain clicks and
+    // the final modifier key-up, otherwise Command/Control can remain latched.
+    CGEventSetFlags(event, (CGEventFlags)flags);
     // Tag event with CrossKVM marker so capture tap ignores it
     CGEventSetIntegerValueField(event, kCGEventSourceUserData, CROSSKVM_USER_DATA_MARKER);
     CGEventPost(kCGHIDEventTap, event);

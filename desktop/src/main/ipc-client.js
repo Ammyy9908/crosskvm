@@ -122,7 +122,7 @@ class DaemonIPCClient extends EventEmitter {
         this.emit('daemon_event', { event: msg.event, data: msg.data });
       }
     } catch (e) {
-      console.error('[IPC Client] Error parsing line:', e, line);
+      console.error('[IPC Client] Invalid daemon response:', e.message);
     }
   }
 

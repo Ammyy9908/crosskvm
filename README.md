@@ -240,3 +240,25 @@ Use the newly generated `desktop/dist/CrossKVM-1.0.0-windows-x64.zip` (or `windo
 `npm run pack:mac` and `npm run dist:mac` rebuild the native daemon before signing and verify the sealed app afterward. Never copy renderer files or a replacement daemon into an already signed `.app`; rebuild the whole bundle instead. Install by replacing the complete app while it is fully quit.
 
 Ad-hoc signatures are tied to the particular build. A new build may require removing the old Accessibility entry and adding the exact installed app again, followed by a full quit and reopen. Stable permission identity across releases requires consistent certificate signing; placing an app in `/Applications` alone does not provide that identity.
+
+### Text clipboard sharing (desktop)
+
+Update both desktop apps, connect the peers, and wait for **Text clipboard sharing active**. Newly copied plain text is then available to paste on the other computer using its normal paste shortcut. Unicode and multiline text are supported up to 64 KiB of UTF-8. Polling runs every 400 ms.
+
+Connecting does not copy the pre-existing clipboard. Empty, non-text and oversized clipboard contents are ignored. Received text is not echoed back. Stop KVM or Disconnect ends sharing. Rich formatting, files and standalone CLI clipboard integration are not included. Use the file transfer area to send images as files. Older peers do not negotiate the clipboard capability and retain input sharing only.
+
+In desktop Settings, **Clipboard Sharing** controls sending and receiving on this computer. The preference is saved across restarts and defaults to on. Turning it back on only shares newly copied text; it does not send text copied while disabled. Both computers must have sharing enabled for text to pass between them.
+
+### Cross-platform keyboard shortcuts
+
+With both peers updated, remote Windows Ctrl maps to macOS Command, and macOS Command maps to Windows Ctrl. Copy, paste, cut, select-all and other shortcuts therefore use the source keyboard's usual primary modifier. The secondary position is swapped too: Windows-key maps to Mac Control, and Mac Control maps to Windows-key. Both left/right modifiers and key releases are translated; same-platform sessions retain their original keys. Local input and emergency-release detection are unchanged.
+
+
+
+### Desktop file transfer
+
+Image clipboard sharing has been replaced by **Send files**. Connect two updated desktop apps, then drag regular files from Finder/Explorer onto the CrossKVM **Send files** area, or click **Choose files**. The receiver saves them to its Downloads directory without overwriting existing files. Text clipboard sharing remains available independently.
+
+Transfers use 48 KiB chunks with receiver acknowledgements, progress and a final SHA-256 check. Files up to 1 GiB each are supported, with up to 100 selected files sent sequentially. Normal disconnects, timeouts and transfer errors remove partial downloads. An abrupt process or OS crash can leave a hidden .crosskvm-*.part file in Downloads; it is not a completed transfer.
+
+Folders, resume after interruption, Finder-to-Explorer screen-edge dragging and clipboard file paste are not supported in this version.

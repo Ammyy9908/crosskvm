@@ -1,6 +1,11 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('crosskvm', {
+  getClipboardSettings: () => ipcRenderer.invoke('crosskvm:getClipboardSettings'),
+  setClipboardEnabled: (enabled) => ipcRenderer.invoke('crosskvm:setClipboardEnabled', enabled),
+  filePath: file => webUtils.getPathForFile(file),
+  sendFiles: paths => ipcRenderer.invoke('crosskvm:sendFiles', paths),
+  chooseFiles: () => ipcRenderer.invoke('crosskvm:chooseFiles'),
   getDaemonStatus: () => ipcRenderer.invoke('crosskvm:getDaemonStatus'),
   getLocalInfo: () => ipcRenderer.invoke('crosskvm:getLocalInfo'),
   getPeers: () => ipcRenderer.invoke('crosskvm:getPeers'),

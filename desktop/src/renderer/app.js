@@ -146,6 +146,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function handleDaemonEvent({ event, data }) {
     switch (event) {
+      case 'file_progress': {
+        const bar = document.getElementById('file-progress');
+        bar.hidden = false;
+        bar.value = data.size ? Math.round(data.bytes / data.size * 100) : (data.state === 'complete' ? 100 : 0);
+        const label = data.state === 'complete'
+          ? (data.direction === 'send' ? 'Upload Completed' : 'Download Completed')
+          : data.state === 'failed' ? 'Transfer Failed'
+          : (data.direction === 'send' ? 'Sending' : 'Receiving');
+        document.getElementById('file-status').textContent = label + ' — ' + data.name + ' — ' + (data.detail || bar.value + '%');
+        return;
+      }
+      case 'clipboard_notice':
+        document.getElementById('clipboard-notice').textContent = data.message;
+        document.getElementById('clipboard-notice').hidden = false;
+        return;
       case 'peer_discovered':
         handlePeerDiscovered(data);
         break;
@@ -291,6 +306,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (layoutDrag || layoutSaving) return;
     inputNotice.textContent = status.inputError || '';
     inputNotice.hidden = !status.inputError;
+    renderClipboardStatus();
+    document.getElementById('choose-files').disabled = !status.fileTransferAvailable || fileSending;
+    document.getElementById('file-availability').textContent = status.fileTransferAvailable ? 'Ready to send and receive files' : 'Connect an updated peer to transfer files.';
     const isConn = status.connectionState === 'connected';
 
     applyConnectionState(status.connectionState, status.currentPeer, status.peerSide);
@@ -616,7 +634,65 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  let fileSending = false;
+  const drop = document.getElementById('file-drop');
+  async function runFileSend(action) {
+    if (fileSending) return;
+    fileSending = true;
+    document.getElementById('choose-files').disabled = true;
+    try { await action(); }
+    catch (err) { document.getElementById('file-status').textContent = 'Transfer failed: ' + err.message; }
+    finally {
+      fileSending = false;
+      document.getElementById('choose-files').disabled = !currentStatus?.fileTransferAvailable;
+    }
+  }
+  document.getElementById('choose-files').addEventListener('click', () => runFileSend(() => window.crosskvm.chooseFiles()));
+  window.addEventListener('dragover', e => e.preventDefault());
+  window.addEventListener('drop', e => e.preventDefault());
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag-over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('drag-over'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault(); drop.classList.remove('drag-over');
+    const paths = Array.from(e.dataTransfer.files).map(file => window.crosskvm.filePath(file)).filter(Boolean);
+    if (paths.length) runFileSend(() => window.crosskvm.sendFiles(paths));
+  });
   // Settings Modal Handlers
+  const clipboardToggle = document.getElementById('setting-clipboard');
+  const clipboardError = document.getElementById('clipboard-setting-error');
+  let clipboardEnabled = true;
+  function renderClipboardStatus() {
+    document.getElementById('clipboard-status').textContent = !clipboardEnabled
+      ? 'Clipboard sharing off'
+      : currentStatus?.clipboardAvailable ? 'Text clipboard sharing active'
+      : 'Clipboard sharing inactive — connect an updated peer';
+  }
+  window.crosskvm.getClipboardSettings().then(settings => {
+    clipboardEnabled = settings.clipboardEnabled;
+    clipboardToggle.checked = clipboardEnabled;
+    clipboardToggle.disabled = false;
+    renderClipboardStatus();
+  }).catch(() => {
+    clipboardError.textContent = 'Could not load clipboard settings. Reopen the app to retry.';
+    clipboardError.hidden = false;
+  });
+  clipboardToggle.addEventListener('change', async () => {
+    clipboardToggle.disabled = true;
+    clipboardError.hidden = true;
+    try {
+      const settings = await window.crosskvm.setClipboardEnabled(clipboardToggle.checked);
+      clipboardEnabled = settings.clipboardEnabled;
+      try { currentStatus = await window.crosskvm.getStatus(); } catch (_) {}
+    } catch (_) {
+      clipboardError.textContent = 'Could not save clipboard preference. Please try again.';
+      clipboardError.hidden = false;
+    } finally {
+      clipboardToggle.checked = clipboardEnabled;
+      clipboardToggle.disabled = false;
+      renderClipboardStatus();
+    }
+  });
+
   btnSettingsOpen.addEventListener('click', () => {
     settingsModal.style.display = 'flex';
   });

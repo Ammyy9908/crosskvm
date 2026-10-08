@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,6 +37,7 @@ func (side PeerSide) IsScreenSide() bool {
 }
 func (side PeerSide) vertical() bool { return side == PeerSideTop || side == PeerSideBottom }
 func (side PeerSide) highEdge() bool { return side == PeerSideRight || side == PeerSideBottom }
+
 // Opposite returns the complementary screen edge for a peer.
 func (side PeerSide) Opposite() PeerSide {
 	switch side {
@@ -738,7 +740,7 @@ func (r *Router) HandleRemoteMessage(msg protocol.Message) error {
 			r.mu.Unlock()
 		}
 
-		err := r.backend.Inject(*msg.Input)
+		err := r.backend.Inject(input.TranslateModifiers(*msg.Input, msg.SourceOS, runtime.GOOS))
 		tInjectEnd := time.Now().UnixNano()
 
 		if r.metrics != nil {

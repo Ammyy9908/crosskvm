@@ -77,14 +77,17 @@ func FromDiscoveryPeer(p discovery.Peer) PeerInfo {
 
 // StatusResponse encapsulates current KVM and connection state.
 type StatusResponse struct {
-	ConnectionState string             `json:"connectionState"` // disconnected, connecting, connected, reconnecting
-	InputError      string             `json:"inputError,omitempty"`
-	KVMActive       bool               `json:"kvmActive"`
-	ControlState    string             `json:"controlState"` // local, remote, transitioning
-	PeerSide        string             `json:"peerSide"`     // left, right, none
-	CurrentPeer     *PeerInfo          `json:"currentPeer,omitempty"`
-	LocalBounds     input.ScreenBounds `json:"localBounds"`
-	RemoteBounds    input.ScreenBounds `json:"remoteBounds"`
+	FileTransferAvailable   bool               `json:"fileTransferAvailable"`
+	ImageClipboardAvailable bool               `json:"imageClipboardAvailable"`
+	ClipboardAvailable      bool               `json:"clipboardAvailable"`
+	ConnectionState         string             `json:"connectionState"` // disconnected, connecting, connected, reconnecting
+	InputError              string             `json:"inputError,omitempty"`
+	KVMActive               bool               `json:"kvmActive"`
+	ControlState            string             `json:"controlState"` // local, remote, transitioning
+	PeerSide                string             `json:"peerSide"`     // left, right, none
+	CurrentPeer             *PeerInfo          `json:"currentPeer,omitempty"`
+	LocalBounds             input.ScreenBounds `json:"localBounds"`
+	RemoteBounds            input.ScreenBounds `json:"remoteBounds"`
 }
 
 // ConnectParams specifies parameters for the connect method.

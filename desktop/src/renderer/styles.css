@@ -750,3 +750,8 @@ body {
 
 .layout-canvas.layout-peer-top, .layout-canvas.layout-peer-bottom { flex-direction: column; min-height: 350px; }
 .layout-canvas.layout-peer-top .monitor-box, .layout-canvas.layout-peer-bottom .monitor-box { flex: none; width: 220px; }
+
+.file-drop { margin:24px 0; padding:24px; border:2px dashed #334155; border-radius:14px; background:#101827; color:#cbd5e1; }
+.file-drop.drag-over { border-color:#38bdf8; background:#142b3c; }
+.file-drop p { margin:12px 0; }
+.file-drop progress { width:100%; accent-color:#10b981; }

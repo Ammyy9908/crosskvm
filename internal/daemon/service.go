@@ -29,25 +29,28 @@ var (
 
 // DaemonService coordinates the full CrossKVM backend for the desktop UI.
 type DaemonService struct {
-	mu           sync.RWMutex
-	logger       *log.Logger
-	localDev     *discovery.LocalDevice
-	backend      input.InputBackend
-	router       *control.Router
-	stateMgr     *control.StateManager
-	connMgr      *control.ConnectionManager
-	peerStore    *discovery.PeerStore
-	discService  *discovery.DiscoveryService
-	server       *transport.Server
-	activeConn   atomic.Pointer[transport.Conn]
-	seqCounter   atomic.Uint64
-	inputError   string
-	captureMu    sync.Mutex
-	captureReady atomic.Bool
-	currentPeer  *PeerInfo
-	kvmActive    atomic.Bool
-	edgeThresh   int
-	listenPort   int
+	clipboardConn      atomic.Pointer[transport.Conn]
+	imageClipboardConn atomic.Pointer[transport.Conn]
+	fileTransferConn   atomic.Pointer[transport.Conn]
+	mu                 sync.RWMutex
+	logger             *log.Logger
+	localDev           *discovery.LocalDevice
+	backend            input.InputBackend
+	router             *control.Router
+	stateMgr           *control.StateManager
+	connMgr            *control.ConnectionManager
+	peerStore          *discovery.PeerStore
+	discService        *discovery.DiscoveryService
+	server             *transport.Server
+	activeConn         atomic.Pointer[transport.Conn]
+	seqCounter         atomic.Uint64
+	inputError         string
+	captureMu          sync.Mutex
+	captureReady       atomic.Bool
+	currentPeer        *PeerInfo
+	kvmActive          atomic.Bool
+	edgeThresh         int
+	listenPort         int
 
 	eventsCh chan input.InputEvent
 	emitFunc func(event IPCEvent)
@@ -80,6 +83,10 @@ func NewDaemonService(listenPort int, logger *log.Logger) (*DaemonService, error
 	localDev, err := discovery.GetLocalDevice(listenPort, bounds.Width, bounds.Height, protocol.CurrentProtocolVersion)
 	if err != nil {
 		logger.Printf("[WARN] Failed to load local device ID: %v", err)
+	}
+
+	if os.Getenv("CROSSKVM_DESKTOP_CLIPBOARD") == "1" {
+		localDev.Capabilities = append(localDev.Capabilities, clipboardCapability, fileTransferCapability)
 	}
 
 	stateMgr := control.NewStateManager()
@@ -272,6 +279,9 @@ func (ds *DaemonService) Start() error {
 
 func (ds *DaemonService) handleInboundConnect(conn *transport.Conn) {
 	ds.logger.Printf("Inbound peer connected from %s", conn.RemoteAddr().String())
+	ds.clipboardConn.Store(nil)
+	ds.imageClipboardConn.Store(nil)
+	ds.fileTransferConn.Store(nil)
 	ds.activeConn.Store(conn)
 	ds.router.SetConnection(conn)
 	ds.connMgr.RecordActivity()
@@ -295,6 +305,18 @@ func (ds *DaemonService) handleInboundConnect(conn *transport.Conn) {
 
 func (ds *DaemonService) handleMessage(conn *transport.Conn, msg protocol.Message) {
 	ds.connMgr.RecordActivity()
+	if msg.Type == protocol.MessageTypeFileTransfer {
+		ds.receiveFileTransfer(conn, msg)
+		return
+	}
+	if msg.Type == protocol.MessageTypeClipboardImage {
+		ds.receiveClipboardImage(conn, msg)
+		return
+	}
+	if msg.Type == protocol.MessageTypeClipboardText {
+		ds.receiveClipboard(conn, msg)
+		return
+	}
 
 	if msg.Type == protocol.MessageTypeHandshake {
 		var payload protocol.HandshakePayload
@@ -350,6 +372,7 @@ func (ds *DaemonService) handleMessage(conn *transport.Conn, msg protocol.Messag
 
 			ds.connMgr.SetState(control.ConnStateConnected)
 			ds.kvmActive.Store(ds.ensureCapture() == nil)
+			ds.negotiateClipboard(conn, payload.Capabilities)
 		}
 	} else if msg.Type == protocol.MessageTypeHandshakeAck {
 		var payload protocol.HandshakeAckPayload
@@ -399,6 +422,7 @@ func (ds *DaemonService) handleMessage(conn *transport.Conn, msg protocol.Messag
 				}
 				ds.connMgr.SetState(control.ConnStateConnected)
 				ds.kvmActive.Store(ds.ensureCapture() == nil)
+				ds.negotiateClipboard(conn, payload.Capabilities)
 			}
 		}
 	}
@@ -410,6 +434,9 @@ func (ds *DaemonService) handleMessage(conn *transport.Conn, msg protocol.Messag
 
 func (ds *DaemonService) handleDisconnect(conn *transport.Conn, err error) {
 	ds.logger.Printf("Peer %s disconnected: %v", conn.RemoteAddr().String(), err)
+	ds.clipboardConn.Store(nil)
+	ds.imageClipboardConn.Store(nil)
+	ds.fileTransferConn.Store(nil)
 	ds.activeConn.Store(nil)
 	ds.kvmActive.Store(false)
 	ds.router.HandleDisconnect(err)
@@ -462,14 +489,17 @@ func (ds *DaemonService) GetStatus() StatusResponse {
 	ds.mu.RUnlock()
 
 	return StatusResponse{
-		ConnectionState: string(ds.connMgr.State()),
-		KVMActive:       ds.kvmActive.Load(),
-		InputError:      inputError,
-		ControlState:    string(ds.stateMgr.Current()),
-		PeerSide:        side,
-		CurrentPeer:     cp,
-		LocalBounds:     ds.router.LocalBounds(),
-		RemoteBounds:    ds.router.RemoteBounds(),
+		ConnectionState:         string(ds.connMgr.State()),
+		KVMActive:               ds.kvmActive.Load(),
+		ClipboardAvailable:      ds.clipboardConn.Load() != nil,
+		ImageClipboardAvailable: ds.imageClipboardConn.Load() != nil,
+		FileTransferAvailable:   ds.fileTransferConn.Load() != nil,
+		InputError:              inputError,
+		ControlState:            string(ds.stateMgr.Current()),
+		PeerSide:                side,
+		CurrentPeer:             cp,
+		LocalBounds:             ds.router.LocalBounds(),
+		RemoteBounds:            ds.router.RemoteBounds(),
 	}
 }
 
@@ -555,6 +585,9 @@ func (ds *DaemonService) Connect(peerID, addr string) error {
 		return fmt.Errorf("failed to connect to peer %s: %w", targetAddr, err)
 	}
 
+	ds.clipboardConn.Store(nil)
+	ds.imageClipboardConn.Store(nil)
+	ds.fileTransferConn.Store(nil)
 	ds.activeConn.Store(conn)
 	ds.router.SetConnection(conn)
 	ds.connMgr.RecordActivity()
@@ -603,6 +636,9 @@ func (ds *DaemonService) Connect(peerID, addr string) error {
 
 // Disconnect severs active connection and releases input.
 func (ds *DaemonService) Disconnect() error {
+	ds.clipboardConn.Store(nil)
+	ds.imageClipboardConn.Store(nil)
+	ds.fileTransferConn.Store(nil)
 	ds.kvmActive.Store(false)
 	ds.router.ReleaseToLocal()
 	conn := ds.activeConn.Swap(nil)

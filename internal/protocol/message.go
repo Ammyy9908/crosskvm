@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"time"
 
@@ -17,6 +18,9 @@ const CurrentProtocolVersion = "1.0.0"
 type MessageType string
 
 const (
+	MessageTypeFileTransfer   MessageType = "file_transfer"
+	MessageTypeClipboardImage MessageType = "clipboard_image"
+	MessageTypeClipboardText  MessageType = "clipboard_text"
 	MessageTypeInput          MessageType = "input"
 	MessageTypePing           MessageType = "ping"
 	MessageTypePong           MessageType = "pong"
@@ -107,6 +111,7 @@ type ErrorPayload struct {
 
 // Message represents the standard protocol envelope exchanged over the network.
 type Message struct {
+	SourceOS  string            `json:"source_os,omitempty"`
 	Type      MessageType       `json:"type"`
 	Seq       uint64            `json:"seq"`
 	Timestamp int64             `json:"timestamp"`
@@ -128,6 +133,7 @@ type PongPayload struct {
 func NewInputMessage(seq uint64, event input.InputEvent) Message {
 	return Message{
 		Type:      MessageTypeInput,
+		SourceOS:  runtime.GOOS,
 		Seq:       seq,
 		Timestamp: time.Now().UnixNano(),
 		Input:     &event,
@@ -320,7 +326,7 @@ func (m Message) Validate() error {
 		return m.Input.Validate()
 	case MessageTypePing, MessageTypePong, MessageTypeHandshake,
 		MessageTypeHandshakeAck, MessageTypeSwitchControl, MessageTypeReleaseControl,
-		MessageTypeLayoutUpdate, MessageTypeError:
+		MessageTypeLayoutUpdate, MessageTypeFileTransfer, MessageTypeClipboardImage, MessageTypeClipboardText, MessageTypeError:
 		return nil
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownMessageType, m.Type)

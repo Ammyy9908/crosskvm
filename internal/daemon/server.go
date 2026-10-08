@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/crosskvm/crosskvm/internal/discovery"
+	"github.com/crosskvm/crosskvm/internal/protocol"
 )
 
 const (
@@ -149,6 +150,7 @@ func (s *IPCServer) handleClient(conn net.Conn) {
 	}()
 
 	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, 4096), protocol.MaxPayloadSize+1024)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -224,6 +226,31 @@ func (s *IPCServer) dispatch(req IPCRequest) IPCResponse {
 	resp := IPCResponse{ID: req.ID}
 
 	switch req.Method {
+	case "send_file_packet":
+		if err := s.service.SendFilePacket(req.Params); err != nil {
+			resp.Error = err.Error()
+		} else {
+			resp.Result = map[string]bool{"success": true}
+		}
+	case "send_clipboard_image":
+		var payload clipboardImagePayload
+		if err := json.Unmarshal(req.Params, &payload); err != nil {
+			resp.Error = "invalid image clipboard request"
+		} else if err = s.service.SendClipboardImage(payload.PNG); err != nil {
+			resp.Error = err.Error()
+		} else {
+			resp.Result = map[string]bool{"success": true}
+		}
+	case "send_clipboard":
+		var payload clipboardPayload
+		if err := json.Unmarshal(req.Params, &payload); err != nil {
+			resp.Error = "invalid clipboard request"
+		} else if err = s.service.SendClipboardText(payload.Text); err != nil {
+			resp.Error = err.Error()
+		} else {
+			resp.Result = map[string]bool{"success": true}
+		}
+
 	case "get_local_info":
 		resp.Result = s.service.GetLocalInfo()
 

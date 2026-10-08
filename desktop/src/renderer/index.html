@@ -112,6 +112,8 @@
           </div>
 
           <div class="arrangement-footer">
+            <span id="clipboard-notice" role="status" hidden></span>
+            <span id="clipboard-status" role="status">Clipboard sharing inactive</span>
             <p id="arrangement-hint">Drag left, right, above or below to match your desk. Arrow keys also work.</p>
             <span id="arrangement-status" role="status" aria-live="polite">Peer on right</span>
           </div>
@@ -157,6 +159,16 @@
           </div>
         </div>
 
+    <section id="file-drop" class="file-drop" aria-label="Send files">
+      <h3>Send files</h3>
+      <p>Drop files here or choose files. Received files are saved to Downloads.</p>
+      <button id="choose-files" class="btn btn-primary" disabled>Choose files</button>
+      <p id="file-availability">Connect an updated peer to transfer files.</p>
+      <progress id="file-progress" max="100" value="0" hidden aria-label="File transfer progress"></progress>
+      <p id="file-status" role="status"></p>
+      <small>Up to 1 GiB per file. Folders are not supported.</small>
+    </section>
+
         <!-- Live Performance Metrics Card -->
         <div class="metrics-card card">
           <div class="metrics-header">
@@ -193,6 +205,14 @@
           <button id="btn-settings-close" class="btn-icon">✕</button>
         </div>
         <div class="modal-body">
+          <div class="setting-item">
+            <div class="setting-text">
+              <label class="setting-title" for="setting-clipboard">Text Clipboard Sharing</label>
+              <div class="setting-desc">Send and receive copied text on this computer while connected. Changes apply immediately.</div>
+            </div>
+            <input type="checkbox" id="setting-clipboard" role="switch" disabled>
+          </div>
+          <p id="clipboard-setting-error" role="alert" hidden></p>
           <div class="setting-item">
             <div class="setting-text">
               <div class="setting-title">Device Name</div>

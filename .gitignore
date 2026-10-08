@@ -58,3 +58,5 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+/desktop/resources/bin/crosskvm*

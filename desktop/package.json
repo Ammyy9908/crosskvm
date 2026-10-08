@@ -7,7 +7,7 @@
   "main": "src/main/main.js",
   "scripts": {
     "start": "npm run build:native && electron .",
-    "test": "node -c src/main/main.js && node -c src/main/ipc-client.js && node -c src/preload/preload.js && node -c src/renderer/app.js",
+    "test": "node -c src/main/main.js && node -c src/main/ipc-client.js && node -c src/preload/preload.js && node -c src/renderer/app.js && node --test tests/*.test.js",
     "pack:mac": "npm run build:native && npm run build:daemon:mac && electron-builder --mac --dir",
     "dist:mac": "npm run build:native && npm run build:daemon:mac && electron-builder --mac",
     "pack:win": "npm run build:daemon:win && electron-builder --win --x64 --dir",
@@ -43,7 +43,7 @@
     ],
     "extraResources": [
       {
-        "from": "../bin",
+        "from": "resources/bin",
         "to": "bin",
         "filter": [
           "crosskvm*",
@@ -78,6 +78,7 @@
       "native/*.node"
     ],
     "afterPack": "./scripts/verify-windows-package.js",
-    "afterSign": "./scripts/verify-macos-signature.js"
+    "afterSign": "./scripts/verify-macos-signature.js",
+    "afterAllArtifactBuild": "./scripts/publish-windows-build.js"
   }
 }

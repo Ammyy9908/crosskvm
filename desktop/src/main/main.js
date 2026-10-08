@@ -1,8 +1,30 @@
-const { app, BrowserWindow, ipcMain, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, clipboard, dialog } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const DaemonIPCClient = require('./ipc-client');
+const ClipboardSync = require('./clipboard-sync');
+const { FileTransfer } = require('./file-transfer');
+let fileTransfer;
+const clipboardSync = new ClipboardSync(clipboard,
+  text => ipcClient.request('send_clipboard', { text }));
+let clipboardTimer;
+let clipboardPreference = true;
+let clipboardAvailable = false;
+function updateClipboardAvailability(available, images = false) {
+  clipboardSync.setImagesEnabled(false);
+  clipboardAvailable = available;
+  clipboardSync.setEnabled(clipboardPreference && available);
+}
+function clipboardSettings() { return { clipboardEnabled: clipboardPreference }; }
+function loadClipboardSettings() {
+  try {
+    const settings = JSON.parse(fs.readFileSync(path.join(app.getPath('userData'), 'clipboard-settings.json'), 'utf8'));
+    clipboardPreference = settings.clipboardEnabled !== false;
+  } catch (err) {
+    if (err.code !== 'ENOENT') console.error('[Settings] Could not read clipboard preference:', err.message);
+  }
+}
 
 let cursorControl = null;
 if (process.platform === 'darwin') {
@@ -25,6 +47,7 @@ function findDaemonBinary() {
 
   // Candidate paths covering packaged app, resources, and dev tree
   const candidates = [
+    path.join(__dirname, '../../resources/bin', binName),
     path.join(process.resourcesPath || '', 'bin', binName),
     path.join(process.resourcesPath || '', binName),
     path.join(__dirname, '../../../bin', binName),
@@ -70,7 +93,7 @@ function ensureDaemonRunning() {
       stdio: ['ignore', outLog, outLog],
       detached: false,
       windowsHide: true,
-      env: { ...process.env, ...(cursorControl ? { CROSSKVM_DESKTOP_CURSOR: '1' } : {}) },
+      env: { ...process.env, CROSSKVM_DESKTOP_CLIPBOARD: '1', ...(cursorControl ? { CROSSKVM_DESKTOP_CURSOR: '1' } : {}) },
     });
 
     daemonProcess.on('error', (err) => {
@@ -113,14 +136,32 @@ function createWindow() {
 
 function setupIPC() {
   ipcClient = new DaemonIPCClient();
+  fileTransfer = new FileTransfer({
+    send: packet => ipcClient.request('send_file_packet', packet),
+    downloads: app.getPath('downloads'),
+    notify: data => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('crosskvm:event', {event:'file_progress',data}); }
+  });
+  async function sendFiles(paths) {
+    const status = await ipcClient.request('get_status');
+    if (!status.fileTransferAvailable) throw new Error('Connect two updated desktop apps to send files');
+    return fileTransfer.sendFiles(paths);
+  }
+  ipcMain.handle('crosskvm:sendFiles', (event, paths) => sendFiles(paths));
+  ipcMain.handle('crosskvm:chooseFiles', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {properties:['openFile','multiSelections']});
+    if (!result.canceled) await sendFiles(result.filePaths);
+  });
 
   ipcClient.on('connected', () => {
+    ipcClient.request('get_status').then(s => updateClipboardAvailability(!!s.clipboardAvailable, !!s.imageClipboardAvailable)).catch(() => {});
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('crosskvm:daemon_status', { connected: true });
     }
   });
 
   ipcClient.on('disconnected', () => {
+    fileTransfer.reset();
+    updateClipboardAvailability(false);
     setRemoteCursor(false);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('crosskvm:daemon_status', { connected: false });
@@ -128,11 +169,29 @@ function setupIPC() {
   });
 
   ipcClient.on('daemon_event', (evt) => {
+    if (evt.event === 'clipboard_ready') updateClipboardAvailability(!!evt.data.enabled, !!evt.data.images);
+    if (evt.event === 'disconnected') updateClipboardAvailability(false);
+    if (evt.event === 'clipboard_image') return;
+    if (evt.event === 'file_packet') { fileTransfer.receive(evt.data); return; }
+    if (evt.event === 'disconnected') fileTransfer.reset();
+    if (evt.event === 'clipboard_text') { clipboardSync.receive(evt.data.text); return; }
     if (evt.event === 'control_switched') setRemoteCursor(evt.data.state === 'remote');
     if (evt.event === 'disconnected') setRemoteCursor(false);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('crosskvm:event', evt);
     }
+  });
+
+  ipcMain.handle('crosskvm:getClipboardSettings', () => clipboardSettings());
+  ipcMain.handle('crosskvm:setClipboardEnabled', (event, enabled) => {
+    if (typeof enabled !== 'boolean') throw new Error('Expected a boolean clipboard preference');
+    const file = path.join(app.getPath('userData'), 'clipboard-settings.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file + '.tmp', JSON.stringify({ clipboardEnabled: enabled }), { mode: 0o600 });
+    fs.renameSync(file + '.tmp', file);
+    clipboardPreference = enabled;
+    clipboardSync.setEnabled(enabled && clipboardAvailable);
+    return clipboardSettings();
   });
 
   // RPC method handlers from Renderer
@@ -153,7 +212,9 @@ function setupIPC() {
   });
 
   ipcMain.handle('crosskvm:getStatus', async () => {
-    return await ipcClient.request('get_status');
+    const status = await ipcClient.request('get_status');
+    return { ...status, clipboardEnabled: clipboardPreference,
+      clipboardAvailable: clipboardPreference && status.clipboardAvailable };
   });
 
   ipcMain.handle('crosskvm:getMetrics', async () => {
@@ -200,7 +261,9 @@ app.whenReady().then(() => {
       }
     });
   }
+  loadClipboardSettings();
   setupIPC();
+  clipboardTimer = setInterval(() => clipboardSync.poll(), 400);
 
   ensureDaemonRunning();
   setTimeout(() => {
@@ -217,6 +280,9 @@ app.whenReady().then(() => {
 });
 
 app.on('before-quit', async () => {
+  clearInterval(clipboardTimer);
+  if (fileTransfer) fileTransfer.reset();
+  updateClipboardAvailability(false);
   globalShortcut.unregisterAll();
   setRemoteCursor(false);
   // Electron does not await async before-quit handlers. Terminate our daemon
