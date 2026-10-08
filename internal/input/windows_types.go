@@ -434,7 +434,7 @@ func (cs *WindowsCaptureState) TranslateCapturedMouse(msg uint32, data *MSLLHOOK
 			return InputEvent{}, false
 		}
 
-		return NewMouseMoveEvent(dx, dy), true
+		return NewMouseMoveEventWithAbs(dx, dy, data.Pt.X, data.Pt.Y), true
 
 	case WM_LBUTTONDOWN:
 		cs.lastX = data.Pt.X

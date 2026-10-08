@@ -395,7 +395,7 @@ func (cs *DarwinCaptureState) TranslateCapturedMouse(eventType uint32, x, y floa
 			return InputEvent{}, false
 		}
 
-		return NewMouseMoveEvent(dx, dy), true
+		return NewMouseMoveEventWithAbs(dx, dy, int32(x), int32(y)), true
 
 	case CGEventTypeLeftMouseDown:
 		cs.lastX = x

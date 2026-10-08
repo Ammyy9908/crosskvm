@@ -52,6 +52,9 @@ type InputEvent struct {
 	Type      EventType   `json:"type"`
 	DX        int32       `json:"dx,omitempty"`
 	DY        int32       `json:"dy,omitempty"`
+	AbsX      int32       `json:"abs_x,omitempty"`
+	AbsY      int32       `json:"abs_y,omitempty"`
+	HasAbs    bool        `json:"has_abs,omitempty"`
 	Button    MouseButton `json:"button,omitempty"`
 	WheelDX   int32       `json:"wheel_dx,omitempty"`
 	WheelDY   int32       `json:"wheel_dy,omitempty"`
@@ -66,6 +69,19 @@ func NewMouseMoveEvent(dx, dy int32) InputEvent {
 		Type:      EventTypeMouseMove,
 		DX:        dx,
 		DY:        dy,
+		Timestamp: time.Now().UnixNano(),
+	}
+}
+
+// NewMouseMoveEventWithAbs creates a mouse movement event with known absolute screen coordinates.
+func NewMouseMoveEventWithAbs(dx, dy, absX, absY int32) InputEvent {
+	return InputEvent{
+		Type:      EventTypeMouseMove,
+		DX:        dx,
+		DY:        dy,
+		AbsX:      absX,
+		AbsY:      absY,
+		HasAbs:    true,
 		Timestamp: time.Now().UnixNano(),
 	}
 }

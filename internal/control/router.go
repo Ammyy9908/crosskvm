@@ -430,8 +430,13 @@ func (r *Router) handleLocalEventLocked(event input.InputEvent) error {
 	hasPeer := conn != nil && !conn.IsClosed()
 
 	if event.Type == input.EventTypeMouseMove {
-		r.localCursorX += int(event.DX)
-		r.localCursorY += int(event.DY)
+		if event.HasAbs {
+			r.localCursorX = int(event.AbsX)
+			r.localCursorY = int(event.AbsY)
+		} else {
+			r.localCursorX += int(event.DX)
+			r.localCursorY += int(event.DY)
+		}
 
 		// Clamp local cursor coordinates within bounds
 		if r.localCursorX < 0 {
