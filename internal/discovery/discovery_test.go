@@ -202,3 +202,24 @@ func TestDiscovery_Announcements_Loopback(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscoveryReplyUsesSenderPort(t *testing.T) {
+	sender, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Skipf("UDP unavailable: %v", err)
+	}
+	defer sender.Close()
+	receiver, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer receiver.Close()
+	ds := NewDiscoveryService(LocalDevice{ID: "local"}, NewEmptyPeerStore(), nil, nil)
+	ds.conn = sender
+	ds.SendBeaconTo(receiver.LocalAddr().(*net.UDPAddr))
+	_ = receiver.SetReadDeadline(time.Now().Add(time.Second))
+	data := make([]byte, 4096)
+	if _, _, err = receiver.ReadFromUDP(data); err != nil {
+		t.Fatalf("reply did not reach ephemeral discovery listener: %v", err)
+	}
+}

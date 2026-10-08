@@ -36,18 +36,23 @@ func (side PeerSide) IsScreenSide() bool {
 }
 func (side PeerSide) vertical() bool { return side == PeerSideTop || side == PeerSideBottom }
 func (side PeerSide) highEdge() bool { return side == PeerSideRight || side == PeerSideBottom }
-func (side PeerSide) opposite() string {
+// Opposite returns the complementary screen edge for a peer.
+func (side PeerSide) Opposite() PeerSide {
 	switch side {
 	case PeerSideLeft:
-		return "right"
+		return PeerSideRight
 	case PeerSideRight:
-		return "left"
+		return PeerSideLeft
 	case PeerSideTop:
-		return "bottom"
+		return PeerSideBottom
 	case PeerSideBottom:
-		return "top"
+		return PeerSideTop
 	}
-	return ""
+	return PeerSideNone
+}
+
+func (side PeerSide) opposite() string {
+	return string(side.Opposite())
 }
 func clampCoordinate(value, size int) int {
 	if value < 0 {
@@ -101,6 +106,7 @@ type Router struct {
 
 	// Configuration
 	peerSide         PeerSide
+	onPeerSideChange func(PeerSide)
 	edgeThreshold    int
 	hysteresisOffset int
 
@@ -216,6 +222,13 @@ func (r *Router) SetPeerSide(side PeerSide) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.peerSide = side
+}
+
+// OnPeerSideChange registers a callback invoked whenever the peer layout arrangement changes.
+func (r *Router) OnPeerSideChange(fn func(PeerSide)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.onPeerSideChange = fn
 }
 
 // PeerSide returns the configured peer position.
@@ -837,6 +850,28 @@ func (r *Router) HandleRemoteMessage(msg protocol.Message) error {
 					if r.logger != nil {
 						r.logger.Printf("[HANDSHAKE_ACK] Peer display bounds: %dx%d (DeviceID: %s)",
 							payload.ScreenWidth, payload.ScreenHeight, payload.DeviceID)
+					}
+				}
+			}
+		}
+		return nil
+
+	case protocol.MessageTypeLayoutUpdate:
+		var payload protocol.LayoutPayload
+		if len(msg.Payload) > 0 {
+			if err := json.Unmarshal(msg.Payload, &payload); err == nil {
+				remotePeerSide := PeerSide(strings.ToLower(strings.TrimSpace(payload.PeerSide)))
+				if remotePeerSide.IsScreenSide() {
+					myPeerSide := remotePeerSide.Opposite()
+					r.SetPeerSide(myPeerSide)
+					r.mu.RLock()
+					fn := r.onPeerSideChange
+					r.mu.RUnlock()
+					if fn != nil {
+						fn(myPeerSide)
+					}
+					if r.logger != nil {
+						r.logger.Printf("[LAYOUT] Peer updated layout. Peer side is now %s (peer sees us at %s)", myPeerSide, remotePeerSide)
 					}
 				}
 			}

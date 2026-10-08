@@ -21,7 +21,7 @@ let ipcClient = null;
 
 function findDaemonBinary() {
   const isWin = process.platform === 'win32';
-  const binName = isWin ? 'crosskvm_amd64.exe' : 'crosskvm';
+  const binName = isWin ? (process.arch === 'arm64' ? 'crosskvm_arm64.exe' : 'crosskvm_amd64.exe') : 'crosskvm';
 
   // Candidate paths covering packaged app, resources, and dev tree
   const candidates = [

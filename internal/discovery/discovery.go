@@ -172,14 +172,13 @@ func (ds *DiscoveryService) SendBeaconTo(addr *net.UDPAddr) {
 
 	ds.mu.Lock()
 	conn := ds.conn
-	port := ds.port
 	ds.mu.Unlock()
 
 	if conn == nil {
 		return
 	}
-	targetAddr := &net.UDPAddr{IP: addr.IP, Port: port}
-	_, _ = conn.WriteTo(data, targetAddr)
+	// Reply to the actual sender port, including an ephemeral fallback listener.
+	_, _ = conn.WriteToUDP(data, addr)
 }
 
 func (ds *DiscoveryService) broadcast(packet BeaconPacket) {
@@ -284,8 +283,11 @@ func (ds *DiscoveryService) listenLoop(ctx context.Context, conn *net.UDPConn) {
 			ds.BroadcastBeacon()
 
 		case "beacon":
-			// Acknowledge beacon with direct unicast beacon back so peer knows we are online
-			ds.SendBeaconTo(remoteAddr)
+			// Limit acknowledgements: unconditional beacon replies create an endless echo.
+			previous, exists := ds.peerStore.Get(packet.DeviceID)
+			if !exists || time.Since(previous.LastSeen) >= BeaconInterval {
+				ds.SendBeaconTo(remoteAddr)
+			}
 
 			senderIP := remoteAddr.IP.String()
 			tcpPort := packet.Port
@@ -340,8 +342,8 @@ func (ds *DiscoveryService) beaconLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			ds.BroadcastBeacon()
-			// Periodically prune stale peers (older than 30s)
-			ds.peerStore.Prune(30 * time.Second)
+			// Periodically prune stale peers (older than 24 hours)
+			ds.peerStore.Prune(24 * time.Hour)
 		}
 	}
 }

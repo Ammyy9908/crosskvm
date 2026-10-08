@@ -32,8 +32,7 @@ var (
 )
 
 var (
-	activeWindowsBackendMu sync.RWMutex
-	activeWindowsBackend   *WindowsBackend
+	activeWindowsBackend atomic.Pointer[WindowsBackend]
 )
 
 type inputSender func(inputs []TagINPUT) error
@@ -121,9 +120,7 @@ func (b *WindowsBackend) StartCapture(events chan<- InputEvent) error {
 	b.captureDone = captureDone
 	b.mu.Unlock()
 
-	activeWindowsBackendMu.Lock()
-	activeWindowsBackend = b
-	activeWindowsBackendMu.Unlock()
+	activeWindowsBackend.Store(b)
 
 	startedCh := make(chan error, 1)
 
@@ -193,11 +190,7 @@ func (b *WindowsBackend) StartCapture(events chan<- InputEvent) error {
 		b.hookThreadID = 0
 		b.mu.Unlock()
 
-		activeWindowsBackendMu.Lock()
-		if activeWindowsBackend == b {
-			activeWindowsBackend = nil
-		}
-		activeWindowsBackendMu.Unlock()
+		activeWindowsBackend.CompareAndSwap(b, nil)
 	}()
 
 	err := <-startedCh
@@ -269,9 +262,7 @@ func lowLevelMouseProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 			return ret
 		}
 
-		activeWindowsBackendMu.RLock()
-		b := activeWindowsBackend
-		activeWindowsBackendMu.RUnlock()
+		b := activeWindowsBackend.Load()
 		if b != nil {
 			b.handleCapturedMouse(uint32(wParam), data)
 			if b.IsSuppressed() {
@@ -295,9 +286,7 @@ func lowLevelKeyboardProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 			return ret
 		}
 
-		activeWindowsBackendMu.RLock()
-		b := activeWindowsBackend
-		activeWindowsBackendMu.RUnlock()
+		b := activeWindowsBackend.Load()
 		if b != nil {
 			if b.emergencyChord.Observe(uint32(wParam), data) {
 				b.suppressed.Store(false)
@@ -307,6 +296,9 @@ func lowLevelKeyboardProc(nCode int, wParam uintptr, lParam uintptr) uintptr {
 				if b.emergencyHandler != nil && b.emergencyPending.CompareAndSwap(false, true) {
 					go func() { defer b.emergencyPending.Store(false); b.emergencyHandler() }()
 				}
+				// Pass escape keystroke through to OS
+				ret, _, _ := procCallNextHookEx.Call(0, uintptr(nCode), wParam, lParam)
+				return ret
 			}
 			b.handleCapturedKeyboard(uint32(wParam), data)
 			if b.IsSuppressed() {

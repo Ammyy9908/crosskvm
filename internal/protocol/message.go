@@ -24,6 +24,7 @@ const (
 	MessageTypeHandshakeAck   MessageType = "handshake_ack"
 	MessageTypeSwitchControl  MessageType = "switch_control"
 	MessageTypeReleaseControl MessageType = "release_control"
+	MessageTypeLayoutUpdate   MessageType = "layout_update"
 	MessageTypeError          MessageType = "error"
 )
 
@@ -43,6 +44,7 @@ type HandshakePayload struct {
 	Arch         string   `json:"arch,omitempty"`
 	ScreenWidth  int      `json:"screen_width,omitempty"`
 	ScreenHeight int      `json:"screen_height,omitempty"`
+	PeerSide     string   `json:"peer_side,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`
 	Timestamp    int64    `json:"timestamp"`
 }
@@ -55,7 +57,13 @@ type HandshakeAckPayload struct {
 	Reason       string   `json:"reason,omitempty"`
 	ScreenWidth  int      `json:"screen_width,omitempty"`
 	ScreenHeight int      `json:"screen_height,omitempty"`
+	PeerSide     string   `json:"peer_side,omitempty"`
 	Capabilities []string `json:"capabilities,omitempty"`
+}
+
+// LayoutPayload carries screen arrangement layout updates between peers.
+type LayoutPayload struct {
+	PeerSide string `json:"peer_side"`
 }
 
 // IsCompatibleVersion checks if the peer protocol version is compatible with our version (matching major version).
@@ -267,6 +275,23 @@ func NewReleaseControlMessage(seq uint64, reason string) (Message, error) {
 	}, nil
 }
 
+// NewLayoutUpdateMessage constructs a layout update message to synchronize screen positions.
+func NewLayoutUpdateMessage(seq uint64, peerSide string) (Message, error) {
+	payloadBytes, err := json.Marshal(LayoutPayload{
+		PeerSide: peerSide,
+	})
+	if err != nil {
+		return Message{}, err
+	}
+
+	return Message{
+		Type:      MessageTypeLayoutUpdate,
+		Seq:       seq,
+		Timestamp: time.Now().UnixNano(),
+		Payload:   payloadBytes,
+	}, nil
+}
+
 // NewErrorMessage constructs an error notification message.
 func NewErrorMessage(seq uint64, errMsg string, code int) (Message, error) {
 	payloadBytes, err := json.Marshal(ErrorPayload{
@@ -294,7 +319,8 @@ func (m Message) Validate() error {
 		}
 		return m.Input.Validate()
 	case MessageTypePing, MessageTypePong, MessageTypeHandshake,
-		MessageTypeHandshakeAck, MessageTypeSwitchControl, MessageTypeReleaseControl, MessageTypeError:
+		MessageTypeHandshakeAck, MessageTypeSwitchControl, MessageTypeReleaseControl,
+		MessageTypeLayoutUpdate, MessageTypeError:
 		return nil
 	default:
 		return fmt.Errorf("%w: %s", ErrUnknownMessageType, m.Type)

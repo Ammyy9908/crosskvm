@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"github.com/crosskvm/crosskvm/internal/control"
 	"github.com/crosskvm/crosskvm/internal/input"
+	"github.com/crosskvm/crosskvm/internal/transport"
 	"io"
 	"log"
 	"net"
@@ -272,5 +273,49 @@ func TestIPCNotificationsNeverBlockRouting(t *testing.T) {
 	var response IPCResponse
 	if err = json.Unmarshal(line, &response); err != nil || response.ID != 42 {
 		t.Fatalf("response corrupted: %s", line)
+	}
+}
+
+func TestStopKVMEndsSharingConnection(t *testing.T) {
+	ds, err := NewDaemonService(14545, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ds.Close()
+	a, b := net.Pipe()
+	defer b.Close()
+	conn := transport.NewConn(a)
+	ds.activeConn.Store(conn)
+	ds.router.SetConnection(conn)
+	ds.connMgr.SetState(control.ConnStateConnected)
+	ds.kvmActive.Store(true)
+	if err = ds.StopKVM(); err != nil {
+		t.Fatal(err)
+	}
+	status := ds.GetStatus()
+	if status.KVMActive || status.ConnectionState != "disconnected" || !conn.IsClosed() {
+		t.Fatalf("stop left sharing enabled: %+v", status)
+	}
+}
+
+func TestRemoteDisconnectStopsKVM(t *testing.T) {
+	ds, err := NewDaemonService(14545, log.New(io.Discard, "", 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ds.Close()
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	conn := transport.NewConn(a)
+	ds.activeConn.Store(conn)
+	ds.router.SetConnection(conn)
+	ds.connMgr.SetState(control.ConnStateConnected)
+	ds.kvmActive.Store(true)
+	_ = ds.stateMgr.SwitchToRemote()
+	ds.handleDisconnect(conn, io.EOF)
+	status := ds.GetStatus()
+	if status.KVMActive || status.ConnectionState != "disconnected" || status.ControlState != "local" {
+		t.Fatalf("remote disconnect left stale state: %+v", status)
 	}
 }

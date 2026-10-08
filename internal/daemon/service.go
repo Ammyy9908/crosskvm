@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"runtime"
 	"strings"
@@ -173,6 +174,14 @@ func (ds *DaemonService) Start() error {
 	// Wire state change notifications
 	ds.stateMgr.OnStateChange(ds.notifyControlState)
 
+	// Wire peer layout changes received from remote peer
+	ds.router.OnPeerSideChange(func(side control.PeerSide) {
+		ds.emit(IPCEvent{
+			Event: "peer_side_changed",
+			Data:  map[string]string{"side": string(side)},
+		})
+	})
+
 	// Wire connection state notifications
 	ds.connMgr.OnStateChange(func(oldState, newState control.ConnState) {
 		switch newState {
@@ -303,12 +312,33 @@ func (ds *DaemonService) handleMessage(conn *transport.Conn, msg protocol.Messag
 				Height: payload.ScreenHeight,
 			})
 
+			remoteHost := conn.RemoteAddr().String()
+			hostIP := remoteHost
+			if h, _, err := net.SplitHostPort(remoteHost); err == nil {
+				hostIP = h
+			}
+			ds.peerStore.AddOrUpdate(discovery.Peer{
+				DeviceID:        payload.DeviceID,
+				DeviceName:      payload.PeerName,
+				OS:              payload.OS,
+				Arch:            payload.Arch,
+				Port:            4545,
+				Address:         fmt.Sprintf("%s:%d", hostIP, 4545),
+				IP:              hostIP,
+				ScreenWidth:     payload.ScreenWidth,
+				ScreenHeight:    payload.ScreenHeight,
+				ProtocolVersion: protocol.CurrentProtocolVersion,
+				LastSeen:        time.Now(),
+			})
+
 			peerInfo := PeerInfo{
 				ID:           payload.DeviceID,
 				Name:         payload.PeerName,
 				OS:           payload.OS,
 				Arch:         payload.Arch,
-				Address:      conn.RemoteAddr().String(),
+				Address:      fmt.Sprintf("%s:%d", hostIP, 4545),
+				IP:           hostIP,
+				Port:         4545,
 				ScreenWidth:  payload.ScreenWidth,
 				ScreenHeight: payload.ScreenHeight,
 				Online:       true,
@@ -329,7 +359,46 @@ func (ds *DaemonService) handleMessage(conn *transport.Conn, msg protocol.Messag
 					Width:  payload.ScreenWidth,
 					Height: payload.ScreenHeight,
 				})
+				if payload.DeviceID != "" {
+					remoteHost := conn.RemoteAddr().String()
+					hostIP := remoteHost
+					if h, _, err := net.SplitHostPort(remoteHost); err == nil {
+						hostIP = h
+					}
+					ds.peerStore.AddOrUpdate(discovery.Peer{
+						DeviceID:        payload.DeviceID,
+						DeviceName:      payload.DeviceID,
+						Port:            4545,
+						Address:         fmt.Sprintf("%s:%d", hostIP, 4545),
+						IP:              hostIP,
+						ScreenWidth:     payload.ScreenWidth,
+						ScreenHeight:    payload.ScreenHeight,
+						ProtocolVersion: protocol.CurrentProtocolVersion,
+						LastSeen:        time.Now(),
+					})
+
+					ds.mu.Lock()
+					if ds.currentPeer == nil || ds.currentPeer.ID == "" {
+						if p, ok := ds.peerStore.FindByNameOrID(payload.DeviceID); ok {
+							info := FromDiscoveryPeer(p)
+							ds.currentPeer = &info
+						} else {
+							ds.currentPeer = &PeerInfo{
+								ID:           payload.DeviceID,
+								Name:         payload.DeviceID,
+								Address:      fmt.Sprintf("%s:%d", hostIP, 4545),
+								IP:           hostIP,
+								Port:         4545,
+								ScreenWidth:  payload.ScreenWidth,
+								ScreenHeight: payload.ScreenHeight,
+								Online:       true,
+							}
+						}
+					}
+					ds.mu.Unlock()
+				}
 				ds.connMgr.SetState(control.ConnStateConnected)
+				ds.kvmActive.Store(ds.ensureCapture() == nil)
 			}
 		}
 	}
@@ -342,6 +411,7 @@ func (ds *DaemonService) handleMessage(conn *transport.Conn, msg protocol.Messag
 func (ds *DaemonService) handleDisconnect(conn *transport.Conn, err error) {
 	ds.logger.Printf("Peer %s disconnected: %v", conn.RemoteAddr().String(), err)
 	ds.activeConn.Store(nil)
+	ds.kvmActive.Store(false)
 	ds.router.HandleDisconnect(err)
 	ds.connMgr.SetState(control.ConnStateDisconnected)
 
@@ -422,17 +492,43 @@ func (ds *DaemonService) GetMetrics() control.MetricsSnapshot {
 // Connect dials the specified peer.
 func (ds *DaemonService) Connect(peerID, addr string) error {
 	if ds.connMgr.State() == control.ConnStateConnected {
+		ds.kvmActive.Store(ds.ensureCapture() == nil)
+		ds.mu.RLock()
+		cp := ds.currentPeer
+		side := string(ds.router.PeerSide())
+		ds.mu.RUnlock()
+		var pi PeerInfo
+		if cp != nil {
+			pi = *cp
+		}
+		ds.emit(IPCEvent{
+			Event: "connected",
+			Data: ConnectedEvent{
+				Peer: pi,
+				Side: side,
+			},
+		})
 		return nil // already connected
 	}
 
 	targetAddr := addr
 	var targetPeer *PeerInfo
 
-	if targetAddr == "" && peerID != "" {
+	if peerID != "" {
 		if p, ok := ds.peerStore.FindByNameOrID(peerID); ok {
-			targetAddr = p.Address
+			if targetAddr == "" {
+				targetAddr = p.Address
+			}
 			info := FromDiscoveryPeer(p)
 			targetPeer = &info
+		}
+	} else if targetAddr != "" {
+		for _, p := range ds.peerStore.List() {
+			if p.Address == targetAddr || p.IP == strings.Split(targetAddr, ":")[0] {
+				info := FromDiscoveryPeer(p)
+				targetPeer = &info
+				break
+			}
 		}
 	}
 
@@ -440,12 +536,22 @@ func (ds *DaemonService) Connect(peerID, addr string) error {
 		return fmt.Errorf("%w: %s", ErrPeerNotFound, peerID)
 	}
 
+	// Guarantee valid TCP port 4545
+	if host, port, err := net.SplitHostPort(targetAddr); err == nil {
+		if port == "" || port == "0" {
+			targetAddr = net.JoinHostPort(host, "4545")
+		}
+	} else if !strings.Contains(targetAddr, ":") {
+		targetAddr = net.JoinHostPort(strings.TrimSpace(targetAddr), "4545")
+	}
+
 	ds.connMgr.SetState(control.ConnStateConnecting)
 
-	client := transport.NewClient(3 * time.Second)
+	client := transport.NewClient(5 * time.Second)
 	conn, err := client.Connect(ds.ctx, targetAddr)
 	if err != nil {
 		ds.connMgr.SetState(control.ConnStateDisconnected)
+		ds.logger.Printf("[CONNECT ERROR] target=%s: %v", targetAddr, err)
 		return fmt.Errorf("failed to connect to peer %s: %w", targetAddr, err)
 	}
 
@@ -497,6 +603,7 @@ func (ds *DaemonService) Connect(peerID, addr string) error {
 
 // Disconnect severs active connection and releases input.
 func (ds *DaemonService) Disconnect() error {
+	ds.kvmActive.Store(false)
 	ds.router.ReleaseToLocal()
 	conn := ds.activeConn.Swap(nil)
 	if conn != nil {
@@ -570,21 +677,35 @@ func (ds *DaemonService) StartKVM(peerID, addr, side string) error {
 	return nil
 }
 
-// StopKVM pauses KVM edge switching and restores local control.
+// StopKVM ends the sharing connection and restores local control on both peers.
 func (ds *DaemonService) StopKVM() error {
 	ds.kvmActive.Store(false)
-	ds.router.ReleaseToLocal()
 	ds.router.SetPeerSide(control.PeerSideNone)
-	return nil
+	return ds.Disconnect()
 }
 
-// SetPeerSide updates the peer screen side.
+// SetPeerSide updates the peer screen side locally and syncs with the remote peer over TCP.
 func (ds *DaemonService) SetPeerSide(side string) error {
 	normalizedSide := control.PeerSide(strings.ToLower(strings.TrimSpace(side)))
 	if !normalizedSide.IsScreenSide() && normalizedSide != control.PeerSideNone {
 		return fmt.Errorf("invalid peer side: %s", side)
 	}
 	ds.router.SetPeerSide(normalizedSide)
+
+	// Emit event locally so UI updates
+	ds.emit(IPCEvent{
+		Event: "peer_side_changed",
+		Data:  map[string]string{"side": string(normalizedSide)},
+	})
+
+	// If connected to a peer, send layout update message so peer updates in real time
+	conn := ds.activeConn.Load()
+	if conn != nil && !conn.IsClosed() && normalizedSide.IsScreenSide() {
+		msg, err := protocol.NewLayoutUpdateMessage(ds.seqCounter.Add(1), string(normalizedSide))
+		if err == nil {
+			_ = conn.Send(msg)
+		}
+	}
 	return nil
 }
 

@@ -228,3 +228,15 @@ Press **Ctrl + Alt + Shift + Esc on the physical Windows keyboard** to release l
 If an older build is stuck, use **Ctrl + Alt + Delete → Task Manager** and end both `CrossKVM.exe` and `crosskvm_amd64.exe` (or `crosskvm_arm64.exe`). `bin/stop-crosskvm.bat` provides the same termination commands. The recovery ZIP includes it beside `CrossKVM.exe`; extract the complete folder before launching.
 
 Windows daemon logs are in `%APPDATA%\CrossKVM\logs\daemon.log`.
+
+### Rebuilding the Windows desktop app
+
+From `desktop/`, run `npm run dist:win` for Intel/AMD Windows laptops (x64), or `npm run dist:win:arm64` for ARM Windows devices. These commands rebuild both Go daemons before packaging. The app selects its matching daemon architecture.
+
+Use the newly generated `desktop/dist/CrossKVM-1.0.0-windows-x64.zip` (or `windows-arm64.zip`), not older `CrossKVM-1.0.0-win.zip` files copied into `bin/`. The build verifies the packaged UI, daemon and recovery script against current source; stale content or mismatched architectures fail the build. Each extracted package includes `build-info.json` with its architecture, build time and hashes.
+
+### macOS signed bundles and Accessibility
+
+`npm run pack:mac` and `npm run dist:mac` rebuild the native daemon before signing and verify the sealed app afterward. Never copy renderer files or a replacement daemon into an already signed `.app`; rebuild the whole bundle instead. Install by replacing the complete app while it is fully quit.
+
+Ad-hoc signatures are tied to the particular build. A new build may require removing the old Accessibility entry and adding the exact installed app again, followed by a full quit and reopen. Stable permission identity across releases requires consistent certificate signing; placing an app in `/Applications` alone does not provide that identity.

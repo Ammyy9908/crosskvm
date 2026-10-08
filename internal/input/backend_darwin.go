@@ -101,15 +101,10 @@ func (b *DarwinBackend) StartCapture(events chan<- InputEvent) error {
 		return ErrCaptureAlreadyBusy
 	}
 
-	if !CheckAccessibilityPermission(false) {
-		b.mu.Unlock()
-		return ErrAccessibilityNotGranted
-	}
-
 	session, err := StartNativeCapture(b)
 	if err != nil {
 		b.mu.Unlock()
-		return err
+		return ErrAccessibilityNotGranted
 	}
 
 	b.eventsCh = events

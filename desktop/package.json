@@ -8,12 +8,16 @@
   "scripts": {
     "start": "npm run build:native && electron .",
     "test": "node -c src/main/main.js && node -c src/main/ipc-client.js && node -c src/preload/preload.js && node -c src/renderer/app.js",
-    "pack:mac": "npm run build:native && electron-builder --mac --dir",
-    "dist:mac": "npm run build:native && electron-builder --mac",
-    "pack:win": "electron-builder --win --dir",
-    "dist:win": "electron-builder --win",
-    "dist:all": "electron-builder --mac --win",
-    "build:native": "node scripts/build-native.js"
+    "pack:mac": "npm run build:native && npm run build:daemon:mac && electron-builder --mac --dir",
+    "dist:mac": "npm run build:native && npm run build:daemon:mac && electron-builder --mac",
+    "pack:win": "npm run build:daemon:win && electron-builder --win --x64 --dir",
+    "dist:win": "npm run build:daemon:win && electron-builder --win --x64",
+    "dist:all": "npm run build:native && npm run build:daemon:win && electron-builder --mac --win --x64 --arm64",
+    "build:native": "node scripts/build-native.js",
+    "build:daemon:win": "node scripts/build-windows-daemon.js",
+    "pack:win:arm64": "npm run build:daemon:win && electron-builder --win --arm64 --dir",
+    "dist:win:arm64": "npm run build:daemon:win && electron-builder --win --arm64",
+    "build:daemon:mac": "node scripts/build-macos-daemon.js"
   },
   "keywords": [
     "kvm",
@@ -54,14 +58,17 @@
         "zip"
       ],
       "category": "public.app-category.utilities",
-      "identity": "-"
+      "identity": "-",
+      "extendInfo": {
+        "NSLocalNetworkUsageDescription": "CrossKVM discovers and connects to your other computers on the local network to share your mouse and keyboard."
+      }
     },
     "win": {
       "target": [
-        "nsis",
-        "portable",
-        "zip"
-      ]
+        "zip",
+        "dir"
+      ],
+      "artifactName": "${productName}-${version}-windows-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -69,6 +76,8 @@
     },
     "asarUnpack": [
       "native/*.node"
-    ]
+    ],
+    "afterPack": "./scripts/verify-windows-package.js",
+    "afterSign": "./scripts/verify-macos-signature.js"
   }
 }

@@ -173,6 +173,14 @@ document.addEventListener('DOMContentLoaded', () => {
         applyControlState(data.state);
         break;
 
+      case 'peer_side_changed':
+      case 'layout_updated':
+        if (data && data.side) {
+          setLayoutSide(data.side);
+          if (currentStatus) currentStatus.peerSide = data.side;
+        }
+        break;
+
       case 'latency_updated':
         applyMetrics(data);
         break;
@@ -202,7 +210,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function handlePeerLost(data) {
-    knownPeers = knownPeers.filter(p => p.id !== data.deviceId);
+    const peer = knownPeers.find(p => p.id === data.deviceId);
+    if (peer) {
+      peer.online = false;
+    }
     renderPeers(knownPeers);
   }
 
@@ -220,7 +231,9 @@ document.addEventListener('DOMContentLoaded', () => {
     peersList.innerHTML = '';
     peers.forEach(peer => {
       const isSelected = peer.id === selectedPeerId;
-      const isConnected = currentStatus && currentStatus.connectionState === 'connected' && currentStatus.currentPeer && currentStatus.currentPeer.id === peer.id;
+      const activePeer = currentStatus && currentStatus.currentPeer;
+      const isConnected = currentStatus && currentStatus.connectionState === 'connected' && activePeer &&
+        (activePeer.id === peer.id || (activePeer.address && activePeer.address === peer.address));
 
       const card = document.createElement('div');
       card.className = `peer-card ${isSelected ? 'is-active' : ''}`;
@@ -230,7 +243,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="device-name">${escapeHTML(peer.name)}</div>
             <div class="device-meta">${escapeHTML(peer.os)} · ${peer.screenWidth}×${peer.screenHeight}</div>
           </div>
-          <span class="badge ${peer.online ? 'badge-success' : 'badge-amber'}">${peer.online ? 'Online' : 'Offline'}</span>
+          <span class="badge ${isConnected || peer.online ? 'badge-success' : 'badge-amber'}" title="Discovery status is separate from connection availability">${isConnected ? 'Connected' : peer.online ? 'Discovered' : 'Not recently seen'}</span>
         </div>
         <div class="peer-card-actions">
           <span class="device-id-label">${escapeHTML(peer.id.slice(0, 14))}</span>
@@ -256,7 +269,8 @@ document.addEventListener('DOMContentLoaded', () => {
           e.stopPropagation();
           selectedPeerId = peer.id;
           btnStartKVM.disabled = false;
-          connectToPeer(peer.id, peer.address);
+          const targetAddr = peer.address || (peer.ip ? `${peer.ip}:${peer.port || 4545}` : '');
+          connectToPeer(peer.id, targetAddr);
         });
       }
 
@@ -284,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     setLayoutSide(['left', 'right', 'top', 'bottom'].includes(status.peerSide) ? status.peerSide : layoutSide);
 
-    if (status.kvmActive) {
+    if (status.kvmActive && isConn) {
       btnStartKVM.style.display = 'none';
       btnStopKVM.style.display = 'inline-flex';
     } else {
@@ -476,18 +490,46 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  function showConnectionError(err, addr) {
+    const msg = (err && err.message) ? err.message : String(err);
+    console.error('[Connection Error]', msg);
+
+    let notice = `Connection to ${addr || 'remote peer'} failed.\n\n${msg}`;
+    if (localInfo && localInfo.os === 'darwin') {
+      notice += '\n\nIf this address works in Terminal, check System Settings → Privacy & Security → Local Network → CrossKVM, then quit and reopen the app. Local Network access is separate from Accessibility.';
+    }
+    notice += '\n\nThis error alone does not identify a firewall block.';
+
+    inputNotice.textContent = notice;
+    inputNotice.hidden = false;
+    inputNotice.style.background = 'rgba(239, 68, 68, 0.15)';
+    inputNotice.style.border = '1px solid rgba(239, 68, 68, 0.35)';
+    inputNotice.style.borderRadius = '8px';
+    inputNotice.style.margin = '12px 24px';
+    inputNotice.style.padding = '12px 16px';
+    inputNotice.style.color = '#fca5a5';
+    inputNotice.style.fontSize = '13px';
+    inputNotice.style.lineHeight = '1.5';
+    inputNotice.style.whiteSpace = 'pre-wrap';
+
+    try {
+      alert(notice);
+    } catch (_) {}
+  }
+
   // User Actions
   async function connectToPeer(peerId, addr) {
     try {
+      inputNotice.hidden = true;
       applyConnectionState('connecting', null, null);
-      await window.crosskvm.connect({ peerId, addr });
-    } catch (err) {
-      const msg = err.message || '';
-      if (msg.includes('i/o timeout')) {
-        alert(`Failed to connect to ${addr} (Connection Timed Out).\n\nWindows Defender Firewall on the remote machine is likely blocking incoming TCP port 4545.\n\nQuick Solutions:\n1. Click "Connect" from the Windows machine to this Mac instead (outbound traffic is allowed by Windows Firewall).\n2. Or on Windows, run 'enable-firewall.bat' to permit CrossKVM through the firewall.`);
-      } else {
-        alert(`Connect failed: ${msg}`);
+      const res = await window.crosskvm.connect({ peerId, addr });
+      if (res && res.success) {
+        applyConnectionState('connected', null, null);
+        btnStartKVM.style.display = 'none';
+        btnStopKVM.style.display = 'inline-flex';
       }
+    } catch (err) {
+      showConnectionError(err, addr || peerId);
       applyConnectionState('disconnected', null, null);
     }
   }
@@ -504,20 +546,19 @@ document.addEventListener('DOMContentLoaded', () => {
   btnStartKVM.addEventListener('click', async () => {
     const side = layoutSide;
     try {
+      inputNotice.hidden = true;
       await window.crosskvm.startKVM({ peerId: selectedPeerId, side });
       btnStartKVM.style.display = 'none';
       btnStopKVM.style.display = 'inline-flex';
     } catch (err) {
-      alert(`Failed to start KVM: ${err.message}`);
+      showConnectionError(err, selectedPeerId);
     }
   });
 
   btnStopKVM.addEventListener('click', async () => {
     try {
       await window.crosskvm.stopKVM();
-      btnStartKVM.style.display = 'inline-flex';
-      btnStopKVM.style.display = 'none';
-      applyControlState('local');
+      applyStatus(await window.crosskvm.getStatus());
     } catch (err) {
       console.error('Failed to stop KVM:', err);
     }
