@@ -1,0 +1,60 @@
+# Binaries and build outputs
+bin/
+dist/
+dist-*/
+desktop/dist/
+desktop/dist-*/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.app
+*.dmg
+*.pkg
+*.deb
+*.rpm
+*.zip
+*.tar.gz
+
+# Go test / compilation artifacts
+*.test
+*.out
+*.cov
+*.o
+*.a
+coverage.txt
+profile.out
+
+# Scratch / test artifacts
+keydown
+keyup
+mousemove
+
+# Dependencies
+node_modules/
+desktop/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# CrossKVM local runtime state / device identities
+.crosskvm/
+**/.crosskvm/
+
+# OS specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+[Dd]esktop.ini
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~

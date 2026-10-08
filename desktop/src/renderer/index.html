@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CrossKVM</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-logo">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">CrossKVM</h1>
+          <span class="brand-subtitle">Seamless Dual-Machine Control</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div id="daemon-badge" class="status-pill status-disconnected">
+          <span class="status-dot"></span>
+          <span id="daemon-status-text">Daemon Connecting...</span>
+        </div>
+        <button id="btn-settings-open" class="btn-icon" title="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <main class="main-content">
+      <!-- Left Column: Devices -->
+      <section class="panel-section devices-section">
+        <h2 class="section-title">This Device</h2>
+        <div class="card local-card">
+          <div class="device-card-header">
+            <div class="device-icon local-icon">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+            </div>
+            <div>
+              <div id="local-device-name" class="device-name">Loading...</div>
+              <div id="local-device-os" class="device-meta">macOS · 1470×956</div>
+            </div>
+          </div>
+          <div class="device-card-footer">
+            <span id="local-status-badge" class="badge badge-success">Ready</span>
+            <span id="local-device-id" class="device-id-label">xkvm-local</span>
+          </div>
+        </div>
+
+        <div class="devices-header-row">
+          <h2 class="section-title">Discovered Peers</h2>
+          <button id="btn-refresh-peers" class="btn-text">Rescan</button>
+        </div>
+        <div id="peers-list" class="peers-list">
+          <div class="empty-peers">
+            <div class="pulse-loader"></div>
+            <span>Scanning local network for CrossKVM machines...</span>
+          </div>
+        </div>
+
+        <div class="direct-connect-card">
+          <div class="direct-connect-title">Direct Connect by IP</div>
+          <div class="direct-connect-desc">Connect directly to your Mac (bypasses company firewall)</div>
+          <div class="direct-connect-row">
+            <input type="text" id="direct-ip-input" placeholder="e.g. 192.168.1.6:4545" class="input-text" />
+            <button id="btn-direct-connect" class="btn btn-primary btn-sm">Connect</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Visual Layout & KVM Controls -->
+      <section class="panel-section layout-section">
+        <h2 class="section-title">Drag &amp; Arrange</h2>
+        
+        <!-- Interactive Virtual Monitors Canvas -->
+        <div class="screen-layout-box">
+          <div id="layout-canvas" class="layout-canvas layout-peer-right">
+            <!-- Left Screen Box -->
+            <div id="screen-left" class="monitor-box monitor-local is-focused" tabindex="0" role="button" aria-describedby="arrangement-hint">
+              <div class="monitor-screen">
+                <div class="monitor-label-title" id="screen-left-title">MacBook</div>
+                <div class="monitor-label-sub" id="screen-left-sub">Local Display</div>
+                <div class="monitor-focus-badge">ACTIVE INPUT</div>
+              </div>
+              <div class="monitor-stand"></div>
+            </div>
+
+            <!-- Right Screen Box -->
+            <div id="screen-right" class="monitor-box monitor-remote" tabindex="0" role="button" aria-describedby="arrangement-hint">
+              <div class="monitor-screen">
+                <div class="monitor-label-title" id="screen-right-title">Windows PC</div>
+                <div class="monitor-label-sub" id="screen-right-sub">Remote Peer</div>
+                <div class="monitor-focus-badge">REMOTE</div>
+              </div>
+              <div class="monitor-stand"></div>
+            </div>
+          </div>
+
+          <div class="arrangement-footer">
+            <p id="arrangement-hint">Drag left, right, above or below to match your desk. Arrow keys also work.</p>
+            <span id="arrangement-status" role="status" aria-live="polite">Peer on right</span>
+          </div>
+          <div hidden aria-hidden="true">
+            <input type="radio" name="peer-side" value="left" id="side-left" tabindex="-1">
+            <input type="radio" name="peer-side" value="right" id="side-right" checked tabindex="-1">
+          </div>
+        </div>
+
+        <!-- Master KVM Action Bar -->
+        <div class="kvm-controls-card card">
+          <div class="controls-status-row">
+            <div>
+              <div class="status-summary-label">Connection State</div>
+              <div id="kvm-conn-state" class="status-summary-val">Disconnected</div>
+            </div>
+            <div>
+              <div class="status-summary-label">Input Focus</div>
+              <div id="kvm-focus-state" class="status-summary-val focus-local">Local</div>
+            </div>
+            <div>
+              <div class="status-summary-label">End-to-End Latency</div>
+              <div id="kvm-latency-val" class="status-summary-val">-- ms</div>
+            </div>
+          </div>
+
+          <div class="controls-action-row">
+            <button id="btn-start-kvm" class="btn btn-primary" disabled>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polygon points="5 3 19 12 5 21 5 3"></polygon>
+              </svg>
+              Start KVM
+            </button>
+            <button id="btn-stop-kvm" class="btn btn-danger" style="display: none;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="6" y="6" width="12" height="12"></rect>
+              </svg>
+              Stop KVM
+            </button>
+            <button id="btn-disconnect" class="btn btn-secondary" style="display: none;">
+              Disconnect Peer
+            </button>
+          </div>
+        </div>
+
+        <!-- Live Performance Metrics Card -->
+        <div class="metrics-card card">
+          <div class="metrics-header">
+            <span class="metrics-title">Live Performance Metrics</span>
+            <span id="metrics-updated" class="metrics-sub">Real-time profiling active</span>
+          </div>
+          <div class="metrics-grid">
+            <div class="metric-item">
+              <div class="metric-num" id="metric-rtt">--</div>
+              <div class="metric-name">Network RTT</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-num" id="metric-p95">--</div>
+              <div class="metric-name">p95 Latency</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-num" id="metric-capture-rate">0</div>
+              <div class="metric-name">Capture Rate (ev/s)</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-num" id="metric-queue-depth">0</div>
+              <div class="metric-name">Queue Depth</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal-backdrop" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="modal-title">Settings</h3>
+          <button id="btn-settings-close" class="btn-icon">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="setting-item">
+            <div class="setting-text">
+              <div class="setting-title">Device Name</div>
+              <div class="setting-desc" id="setting-device-name">Loading...</div>
+            </div>
+          </div>
+          <div class="setting-item">
+            <div class="setting-text">
+              <div class="setting-title">Auto Reconnect</div>
+              <div class="setting-desc">Automatically retry connection on temporary network drop</div>
+            </div>
+            <input type="checkbox" id="setting-auto-reconnect" checked>
+          </div>
+          <div class="setting-item">
+            <div class="setting-text">
+              <div class="setting-title">LAN Peer Discovery</div>
+              <div class="setting-desc">Continuously broadcast and discover peers via UDP beacons</div>
+            </div>
+            <input type="checkbox" id="setting-discovery" checked>
+          </div>
+          <div class="setting-item">
+            <div class="setting-text">
+              <div class="setting-title">Emergency Release Shortcut</div>
+              <div class="setting-desc">Instantly drops suppression and restores local cursor control</div>
+            </div>
+            <span class="hotkey-badge">Ctrl + Alt + Shift + Escape</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

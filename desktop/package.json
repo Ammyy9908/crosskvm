@@ -1,0 +1,74 @@
+{
+  "name": "crosskvm-desktop",
+  "productName": "CrossKVM",
+  "appId": "com.crosskvm.desktop",
+  "version": "1.0.0",
+  "description": "CrossKVM Seamless Two-Machine Desktop Controller",
+  "main": "src/main/main.js",
+  "scripts": {
+    "start": "npm run build:native && electron .",
+    "test": "node -c src/main/main.js && node -c src/main/ipc-client.js && node -c src/preload/preload.js && node -c src/renderer/app.js",
+    "pack:mac": "npm run build:native && electron-builder --mac --dir",
+    "dist:mac": "npm run build:native && electron-builder --mac",
+    "pack:win": "electron-builder --win --dir",
+    "dist:win": "electron-builder --win",
+    "dist:all": "electron-builder --mac --win",
+    "build:native": "node scripts/build-native.js"
+  },
+  "keywords": [
+    "kvm",
+    "mouse-sharing",
+    "cross-platform"
+  ],
+  "author": "CrossKVM Authors",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "electron": "^44.5.1",
+    "electron-builder": "^26.7.0"
+  },
+  "build": {
+    "appId": "com.crosskvm.desktop",
+    "productName": "CrossKVM",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json",
+      "native/*.node"
+    ],
+    "extraResources": [
+      {
+        "from": "../bin",
+        "to": "bin",
+        "filter": [
+          "crosskvm*",
+          "crosskvm_amd64.exe*",
+          "*.bat"
+        ]
+      }
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.utilities",
+      "identity": "-"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "asarUnpack": [
+      "native/*.node"
+    ]
+  }
+}
