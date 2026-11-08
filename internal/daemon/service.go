@@ -32,6 +32,7 @@ type DaemonService struct {
 	clipboardConn      atomic.Pointer[transport.Conn]
 	imageClipboardConn atomic.Pointer[transport.Conn]
 	fileTransferConn   atomic.Pointer[transport.Conn]
+	edgeDragConn       atomic.Pointer[transport.Conn]
 	mu                 sync.RWMutex
 	logger             *log.Logger
 	localDev           *discovery.LocalDevice
@@ -89,6 +90,9 @@ func NewDaemonService(listenPort int, logger *log.Logger) (*DaemonService, error
 		localDev.Capabilities = append(localDev.Capabilities, clipboardCapability, fileTransferCapability)
 	}
 
+	if os.Getenv("CROSSKVM_EDGE_DRAG") == "1" {
+		localDev.Capabilities = append(localDev.Capabilities, "screen-edge-drag-v3")
+	}
 	stateMgr := control.NewStateManager()
 	cfg := control.RouterConfig{
 		PeerSide:         control.PeerSideRight,
@@ -173,6 +177,15 @@ func (ds *DaemonService) Start() error {
 				}
 				if ds.kvmActive.Load() {
 					_ = ds.router.RouteLocalEvent(ev)
+					if ev.Type == input.EventTypeMouseButtonDown && ev.Button == input.MouseButtonLeft {
+						ds.emit(IPCEvent{Event: "physical_left_down"})
+					}
+					if ev.Type == input.EventTypeMouseButtonUp && ev.Button == input.MouseButtonLeft {
+						ds.emit(IPCEvent{Event: "physical_left_up"})
+					}
+					if ev.Type == input.EventTypeKeyDown && strings.EqualFold(ev.Key, "Escape") {
+						ds.emit(IPCEvent{Event: "physical_escape"})
+					}
 				}
 			}
 		}
@@ -282,6 +295,7 @@ func (ds *DaemonService) handleInboundConnect(conn *transport.Conn) {
 	ds.clipboardConn.Store(nil)
 	ds.imageClipboardConn.Store(nil)
 	ds.fileTransferConn.Store(nil)
+	ds.edgeDragConn.Store(nil)
 	ds.activeConn.Store(conn)
 	ds.router.SetConnection(conn)
 	ds.connMgr.RecordActivity()
@@ -437,6 +451,7 @@ func (ds *DaemonService) handleDisconnect(conn *transport.Conn, err error) {
 	ds.clipboardConn.Store(nil)
 	ds.imageClipboardConn.Store(nil)
 	ds.fileTransferConn.Store(nil)
+	ds.edgeDragConn.Store(nil)
 	ds.activeConn.Store(nil)
 	ds.kvmActive.Store(false)
 	ds.router.HandleDisconnect(err)
@@ -494,6 +509,7 @@ func (ds *DaemonService) GetStatus() StatusResponse {
 		ClipboardAvailable:      ds.clipboardConn.Load() != nil,
 		ImageClipboardAvailable: ds.imageClipboardConn.Load() != nil,
 		FileTransferAvailable:   ds.fileTransferConn.Load() != nil,
+		EdgeDragAvailable:       ds.edgeDragConn.Load() != nil,
 		InputError:              inputError,
 		ControlState:            string(ds.stateMgr.Current()),
 		PeerSide:                side,
@@ -588,6 +604,7 @@ func (ds *DaemonService) Connect(peerID, addr string) error {
 	ds.clipboardConn.Store(nil)
 	ds.imageClipboardConn.Store(nil)
 	ds.fileTransferConn.Store(nil)
+	ds.edgeDragConn.Store(nil)
 	ds.activeConn.Store(conn)
 	ds.router.SetConnection(conn)
 	ds.connMgr.RecordActivity()
@@ -639,6 +656,7 @@ func (ds *DaemonService) Disconnect() error {
 	ds.clipboardConn.Store(nil)
 	ds.imageClipboardConn.Store(nil)
 	ds.fileTransferConn.Store(nil)
+	ds.edgeDragConn.Store(nil)
 	ds.kvmActive.Store(false)
 	ds.router.ReleaseToLocal()
 	conn := ds.activeConn.Swap(nil)

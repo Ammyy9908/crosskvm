@@ -24,6 +24,13 @@ func (ds *DaemonService) negotiateClipboard(conn *transport.Conn, capabilities [
 		return
 	}
 	for _, local := range ds.localDev.Capabilities {
+		if local == "screen-edge-drag-v3" {
+			for _, remote := range capabilities {
+				if remote == local {
+					ds.edgeDragConn.Store(conn)
+				}
+			}
+		}
 		if local == fileTransferCapability {
 			for _, remote := range capabilities {
 				if remote == fileTransferCapability {

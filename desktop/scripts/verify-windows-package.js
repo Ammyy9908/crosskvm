@@ -11,7 +11,7 @@ function verifyWindowsPackage(appOutDir, arch) {
   const machine = executable.readUInt16LE(executable.readUInt32LE(0x3c) + 4);
   if (machine !== (arch === 'x64' ? 0x8664 : 0xaa64)) throw new Error('Windows runtime architecture mismatch');
   const archive = path.join(appOutDir, 'resources', 'app.asar');
-  const files = ['src/main/main.js', 'src/main/ipc-client.js', 'src/main/clipboard-sync.js', 'src/main/clipboard-images.js', 'src/main/file-transfer.js', 'src/preload/preload.js', 'src/renderer/app.js', 'src/renderer/index.html', 'src/renderer/styles.css'];
+  const files = ['src/main/main.js', 'src/main/ipc-client.js', 'src/main/clipboard-sync.js', 'src/main/clipboard-images.js', 'src/main/file-transfer.js', 'src/main/edge-drag.js', 'src/main/windows-drag.cs', 'src/main/windows-drag-source.cs', 'src/main/windows-drag-source.js', 'src/preload/preload.js', 'src/renderer/app.js', 'src/renderer/index.html', 'src/renderer/styles.css'];
   const hashes = {};
   for (const file of files) {
     const packaged = asar.extractFile(archive, file);

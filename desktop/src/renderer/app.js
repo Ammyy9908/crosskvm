@@ -146,14 +146,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function handleDaemonEvent({ event, data }) {
     switch (event) {
+      case 'drag_status':
+        document.getElementById('file-status').textContent = data.message;
+        return;
       case 'file_progress': {
         const bar = document.getElementById('file-progress');
         bar.hidden = false;
         bar.value = data.size ? Math.round(data.bytes / data.size * 100) : (data.state === 'complete' ? 100 : 0);
-        const label = data.state === 'complete'
+        const label = data.state === 'staged' ? 'Transfer ready' : data.state === 'complete'
           ? (data.direction === 'send' ? 'Upload Completed' : 'Download Completed')
           : data.state === 'failed' ? 'Transfer Failed'
-          : (data.direction === 'send' ? 'Sending' : 'Receiving');
+          : (data.backgroundCopy ? 'Copying' : data.direction === 'send' ? 'Sending' : 'Receiving');
         document.getElementById('file-status').textContent = label + ' — ' + data.name + ' — ' + (data.detail || bar.value + '%');
         return;
       }
@@ -308,7 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
     inputNotice.hidden = !status.inputError;
     renderClipboardStatus();
     document.getElementById('choose-files').disabled = !status.fileTransferAvailable || fileSending;
-    document.getElementById('file-availability').textContent = status.fileTransferAvailable ? 'Ready to send and receive files' : 'Connect an updated peer to transfer files.';
+    document.getElementById('file-availability').textContent = status.edgeDragAvailable ? 'Bidirectional file dragging available' : 'Connect updated Mac and Windows apps for edge dragging.';
     const isConn = status.connectionState === 'connected';
 
     applyConnectionState(status.connectionState, status.currentPeer, status.peerSide);
@@ -635,7 +638,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   let fileSending = false;
-  const drop = document.getElementById('file-drop');
   async function runFileSend(action) {
     if (fileSending) return;
     fileSending = true;
@@ -648,14 +650,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
   document.getElementById('choose-files').addEventListener('click', () => runFileSend(() => window.crosskvm.chooseFiles()));
-  window.addEventListener('dragover', e => e.preventDefault());
-  window.addEventListener('drop', e => e.preventDefault());
-  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag-over'); });
-  drop.addEventListener('dragleave', () => drop.classList.remove('drag-over'));
-  drop.addEventListener('drop', e => {
-    e.preventDefault(); drop.classList.remove('drag-over');
-    const paths = Array.from(e.dataTransfer.files).map(file => window.crosskvm.filePath(file)).filter(Boolean);
-    if (paths.length) runFileSend(() => window.crosskvm.sendFiles(paths));
+  // This window displays transfer status; it is not a file destination.
+  // preventDefault alone advertises an accepted copy to the OS even though
+  // this handler writes no file. Explicitly reject native file drops.
+  function rejectFileDrop(e) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'none';
+  }
+  window.addEventListener('dragenter', rejectFileDrop);
+  window.addEventListener('dragover', rejectFileDrop);
+  window.addEventListener('drop', e => {
+    rejectFileDrop(e);
+    document.getElementById('file-status').textContent = 'Drop into an open Finder or Explorer folder, not the CrossKVM window.';
   });
   // Settings Modal Handlers
   const clipboardToggle = document.getElementById('setting-clipboard');

@@ -123,3 +123,20 @@ func TestImageClipboardNegotiationAndValidation(t *testing.T) {
 		t.Fatal("received after disconnect")
 	}
 }
+
+func TestBidirectionalDragRequiresUpdatedPeer(t *testing.T) {
+	a, b := net.Pipe()
+	defer a.Close()
+	defer b.Close()
+	conn := transport.NewConn(a)
+	ds := &DaemonService{localDev: &discovery.LocalDevice{Capabilities: []string{"screen-edge-drag-v3"}}}
+	ds.activeConn.Store(conn)
+	ds.negotiateClipboard(conn, []string{"finder-edge-drag-v1"})
+	if ds.edgeDragConn.Load() != nil {
+		t.Fatal("old one-way peer accepted for reverse dragging")
+	}
+	ds.negotiateClipboard(conn, []string{"screen-edge-drag-v3"})
+	if ds.edgeDragConn.Load() != conn {
+		t.Fatal("updated peer did not negotiate dragging")
+	}
+}

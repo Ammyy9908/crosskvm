@@ -12,7 +12,8 @@ function safeName(value) {
   return name;
 }
 class FileTransfer {
-  constructor({send, downloads, notify, timeout = 30000}) {
+  constructor({send, downloads, notify, timeout = 30000, stageDirectory = null, onStaged = null}) {
+    this.stageDirectory = stageDirectory; this.onStaged = onStaged;
     this.send = send; this.downloads = downloads; this.notify = notify;
     this.timeout = timeout; this.pending = new Map(); this.queue = Promise.resolve();
     this.incoming = null; this.busy = false; this.epoch = 0;
@@ -85,10 +86,16 @@ class FileTransfer {
       if (this.incoming) throw new Error('Another file is being received');
       if (!Number.isSafeInteger(p.size) || p.size < 0 || p.size > MAX_SIZE || p.step !== 0) throw new Error('Files must be at most 1 GiB');
       if (typeof p.name !== 'string' || p.name.length > 1024) throw new Error('Invalid filename');
-      await fs.mkdir(this.downloads, {recursive:true});
-      const temp = path.join(this.downloads, '.crosskvm-' + randomUUID() + '.part');
+      let directory = this.downloads;
+      if (p.mode === 'edge') {
+        if (!this.stageDirectory || !this.onStaged || !/^[a-f0-9-]{36}$/.test(p.dragId || '')) throw new Error('Native file dragging is unavailable');
+        if (!Number.isInteger(p.index) || p.index < 0 || p.index >= 100) throw new Error('Invalid promised file index');
+        directory = path.join(this.stageDirectory,p.dragId);
+      } else if (p.mode) throw new Error('Unknown transfer mode');
+      await fs.mkdir(directory, {recursive:true});
+      const temp = path.join(directory, '.crosskvm-' + randomUUID() + '.part');
       const file = await fs.open(temp, 'wx', 0o600);
-      this.incoming = {id:p.id,name:safeName(p.name),size:p.size,offset:0,step:1,temp,file,hash:createHash('sha256')};
+      this.incoming = {index:p.index,directory,dragId:p.mode==='edge'?p.dragId:null,id:p.id,name:safeName(p.name),size:p.size,offset:0,step:1,temp,file,hash:createHash('sha256')};
       if (epoch !== this.epoch) { await this.cleanup(); return; }
     } else {
       const item = this.incoming;
@@ -112,13 +119,14 @@ class FileTransfer {
         const parsed = path.parse(item.name);
         let destination;
         for (let n=0;n<10000;n++) {
-          destination = path.join(this.downloads,n ? parsed.name+' ('+n+')'+parsed.ext : item.name);
+          destination = path.join(item.directory,n ? parsed.name+' ('+n+')'+parsed.ext : item.name);
           try { await fs.copyFile(item.temp,destination,constants.COPYFILE_EXCL); break; }
           catch(err) { if (err.code !== 'EEXIST' || n === 9999) throw err; }
         }
         await fs.unlink(item.temp);
         this.incoming = null;
-        this.progress(path.basename(destination),'receive',item.size,item.size,'complete','Saved to Downloads');
+        if (item.dragId) { await this.onStaged(item.dragId,destination,item.index); this.progress(path.basename(destination),'receive',item.size,item.size,'staged','Received; delivering to destination'); }
+        else this.progress(path.basename(destination),'receive',item.size,item.size,'complete','Saved to Downloads');
         await this.send({kind:'ack',id:p.id,step:p.step});
         return;
       } else throw new Error('Unknown file transfer operation');
@@ -129,27 +137,27 @@ class FileTransfer {
     this.progress(item.name,'receive',item.offset,item.size,'transferring');
     await this.send({kind:'ack',id:p.id,step:p.step});
   }
-  async sendFiles(paths) {
+  async sendFiles(paths, options = {}) {
     if (this.busy) throw new Error('A file transfer is already in progress');
     if (!Array.isArray(paths) || !paths.length || paths.length > 100 || paths.some(p=>typeof p !== 'string')) throw new Error('Choose 1–100 files');
     this.busy = true;
     const epoch = this.epoch;
     try {
-      for (const filename of paths) {
+      for (const [index,filename] of paths.entries()) {
         const id = randomUUID(), name = path.basename(filename);
         let file, step = 0, offset = 0, size = 0;
         try {
-          if (epoch !== this.epoch) throw new Error('Transfer disconnected');
+          if (epoch !== this.epoch || options.cancelled?.()) throw new Error('Transfer cancelled or disconnected');
           const initial = await fs.stat(filename);
           if (!initial.isFile()) throw new Error('Folders and special files are not supported');
           file = await fs.open(filename,'r');
           const stat = await file.stat(); size = stat.size;
           if (!stat.isFile() || size > MAX_SIZE) throw new Error('Choose regular files up to 1 GiB; folders are not supported');
-          if (epoch !== this.epoch) throw new Error('Transfer disconnected');
-          await this.request({kind:'begin',id,step:step++,name,size});
+          if (epoch !== this.epoch || options.cancelled?.()) throw new Error('Transfer cancelled or disconnected');
+          await this.request({kind:'begin',id,step:step++,name,size,...(options.dragId ? {mode:'edge',dragId:options.dragId,index} : {})});
           const hash = createHash('sha256'), buffer = Buffer.alloc(CHUNK);
           while (offset < size) {
-            if (epoch !== this.epoch) throw new Error('Transfer disconnected');
+            if (epoch !== this.epoch || options.cancelled?.()) throw new Error('Transfer cancelled or disconnected');
             const {bytesRead} = await file.read(buffer,0,Math.min(CHUNK,size-offset),offset);
             if (!bytesRead) throw new Error('Source file changed during transfer');
             const bytes = buffer.subarray(0,bytesRead);
@@ -158,9 +166,9 @@ class FileTransfer {
             offset += bytesRead;
             this.progress(name,'send',offset,size,'transferring');
           }
-          if (epoch !== this.epoch) throw new Error('Transfer disconnected');
+          if (epoch !== this.epoch || options.cancelled?.()) throw new Error('Transfer cancelled or disconnected');
           await this.request({kind:'end',id,step:step++,sha256:hash.digest('hex')});
-          this.progress(name,'send',size,size,'complete','Saved to peer Downloads');
+          if (!options.dragId) this.progress(name,'send',size,size,'complete','Saved to peer Downloads');
         } catch(err) {
           if (epoch === this.epoch) await this.send({kind:'cancel',id,step}).catch(()=>{});
           this.progress(name,'send',offset,size,'failed',err.message);

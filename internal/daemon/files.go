@@ -24,7 +24,7 @@ func validFilePacket(data json.RawMessage) bool {
 		return false
 	}
 	switch p.Kind {
-	case "begin", "chunk", "end", "ack", "error", "cancel":
+	case "begin", "chunk", "end", "ack", "error", "cancel", "drag_start", "drag_release", "drag_cancel", "drag_ready", "drag_result":
 		return true
 	}
 	return false

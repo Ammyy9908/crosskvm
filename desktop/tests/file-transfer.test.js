@@ -55,3 +55,16 @@ test('sender fails on timeout and names cannot escape Downloads',async()=>{
   assert.equal(sender.busy,false);
  }finally{await sender.reset();await fs.rm(root,{recursive:true,force:true});}
 });
+test('edge transfers stage verified files outside Downloads',async()=>{
+ const root=await fs.mkdtemp(path.join(os.tmpdir(),'crosskvm-stage-'));
+ let a,b;const staged=[];const id=randomUUID();
+ a=new FileTransfer({downloads:path.join(root,'a'),notify:()=>{},send:async p=>{void b.receive(p);}});
+ b=new FileTransfer({downloads:path.join(root,'downloads'),stageDirectory:path.join(root,'cache'),onStaged:(group,file)=>staged.push({group,file}),notify:()=>{},send:async p=>{void a.receive(p);}});
+ try{
+  const source=path.join(root,'file');await fs.writeFile(source,'payload');
+  await a.sendFiles([source],{dragId:id});
+  assert.equal(staged[0].group,id);
+  assert.equal(await fs.readFile(staged[0].file,'utf8'),'payload');
+  await assert.rejects(fs.stat(path.join(root,'downloads')),e=>e.code==='ENOENT');
+ }finally{await a.reset();await b.reset();await fs.rm(root,{recursive:true,force:true});}
+});

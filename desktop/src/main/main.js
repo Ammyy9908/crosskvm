@@ -1,9 +1,25 @@
-const { app, BrowserWindow, ipcMain, globalShortcut, clipboard, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, globalShortcut, clipboard, dialog, Notification } = require('electron');
 const path = require('path');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const DaemonIPCClient = require('./ipc-client');
 const ClipboardSync = require('./clipboard-sync');
+const { EdgeDrag, startMacDrag } = require('./edge-drag');
+let edgeDrag;
+let backgroundCopyNotification=null;
+function showCopyNotification(message,complete=false) {
+ if(!Notification.isSupported())return;
+ if(backgroundCopyNotification)backgroundCopyNotification.close();
+ backgroundCopyNotification=new Notification({title:complete?'CrossKVM copy finished':'CrossKVM — copying files',body:message,silent:true});
+ backgroundCopyNotification.show();
+ if(complete)backgroundCopyNotification=null;
+}
+let finderDrag = null;
+let finderDrop = null;
+if (process.platform === 'darwin') {
+  try { finderDrag = require('../../native/finder-drag.node'); finderDrop = require('../../native/finder-drop.node'); }
+  catch (err) { finderDrag=null;finderDrop=null;console.error('[Drag] Finder bridge unavailable:', err.message); }
+}
 const { FileTransfer } = require('./file-transfer');
 let fileTransfer;
 const clipboardSync = new ClipboardSync(clipboard,
@@ -93,7 +109,7 @@ function ensureDaemonRunning() {
       stdio: ['ignore', outLog, outLog],
       detached: false,
       windowsHide: true,
-      env: { ...process.env, CROSSKVM_DESKTOP_CLIPBOARD: '1', ...(cursorControl ? { CROSSKVM_DESKTOP_CURSOR: '1' } : {}) },
+      env: { ...process.env, CROSSKVM_DESKTOP_CLIPBOARD: '1', CROSSKVM_EDGE_DRAG: (finderDrag || process.platform === 'win32') ? '1' : '0', ...(cursorControl ? { CROSSKVM_DESKTOP_CURSOR: '1' } : {}) },
     });
 
     daemonProcess.on('error', (err) => {
@@ -139,7 +155,17 @@ function setupIPC() {
   fileTransfer = new FileTransfer({
     send: packet => ipcClient.request('send_file_packet', packet),
     downloads: app.getPath('downloads'),
-    notify: data => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('crosskvm:event', {event:'file_progress',data}); }
+    stageDirectory: path.join(app.getPath('userData'),'drag-cache'),
+    onStaged: (id,file,index) => edgeDrag.stagedFile(id,file,index),
+    notify: data => { data.backgroundCopy=!!edgeDrag?.target?.released; if(data.state==='failed'&&backgroundCopyNotification)showCopyNotification('Copy failed: '+data.detail,true); if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('crosskvm:event', {event:'file_progress',data}); }
+  });
+  edgeDrag = new EdgeDrag({
+    native: process.platform==='win32' ? require('./windows-drag-source').createWindowsDragSource(message=>{console.error('[Drag]',message);if(mainWindow&&!mainWindow.isDestroyed())mainWindow.webContents.send('crosskvm:event',{event:'drag_status',data:{message}});}) : finderDrag,
+    ...(process.platform==='darwin' ? {startDrag:(files,result)=>{if(!finderDrop)throw new Error('Finder drop bridge unavailable');return startMacDrag(finderDrop,files,result);}} : {}),
+    send: packet => ipcClient.request('send_file_packet', packet),
+    status: () => ipcClient.request('get_status'),
+    transfer: fileTransfer,
+    notify: message => { console.log('[Drag]', message); if(message.startsWith('Copying files to'))showCopyNotification('Copying files into the folder where you dropped them. You can continue working.'); if(backgroundCopyNotification&&(message==='Copy complete'||message==='File drag cancelled'||message.startsWith('Copy failed:')))showCopyNotification(message,true); if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('crosskvm:event', {event:'drag_status',data:{message}}); }
   });
   async function sendFiles(paths) {
     const status = await ipcClient.request('get_status');
@@ -160,6 +186,7 @@ function setupIPC() {
   });
 
   ipcClient.on('disconnected', () => {
+    edgeDrag.reset();
     fileTransfer.reset();
     updateClipboardAvailability(false);
     setRemoteCursor(false);
@@ -172,10 +199,20 @@ function setupIPC() {
     if (evt.event === 'clipboard_ready') updateClipboardAvailability(!!evt.data.enabled, !!evt.data.images);
     if (evt.event === 'disconnected') updateClipboardAvailability(false);
     if (evt.event === 'clipboard_image') return;
-    if (evt.event === 'file_packet') { fileTransfer.receive(evt.data); return; }
-    if (evt.event === 'disconnected') fileTransfer.reset();
+    if (evt.event === 'file_packet') {
+      if (evt.data.kind?.startsWith('drag_')) edgeDrag.packet(evt.data).catch(err => console.error('[Drag]',err.message));
+      else fileTransfer.receive(evt.data);
+      return;
+    }
+    if (evt.event === 'physical_left_down') edgeDrag.native?.physicalButton?.(true);
+    if (evt.event === 'physical_left_up') {edgeDrag.native?.physicalButton?.(false);edgeDrag.release(true);}
+    if (evt.event === 'physical_escape') edgeDrag.reset();
+    if (evt.event === 'disconnected') { edgeDrag.reset(); fileTransfer.reset(); }
     if (evt.event === 'clipboard_text') { clipboardSync.receive(evt.data.text); return; }
-    if (evt.event === 'control_switched') setRemoteCursor(evt.data.state === 'remote');
+    if (evt.event === 'control_switched') {
+      setRemoteCursor(evt.data.state === 'remote');
+      edgeDrag.control(evt.data.state === 'remote').catch(err=>console.error('[Drag]',err.message));
+    }
     if (evt.event === 'disconnected') setRemoteCursor(false);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('crosskvm:event', evt);
@@ -234,6 +271,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('crosskvm:stopKVM', async () => {
+    edgeDrag.reset();fileTransfer.reset();
     return await ipcClient.request('stop_kvm');
   });
 
@@ -281,6 +319,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', async () => {
   clearInterval(clipboardTimer);
+  if (edgeDrag) edgeDrag.close();
   if (fileTransfer) fileTransfer.reset();
   updateClipboardAvailability(false);
   globalShortcut.unregisterAll();

@@ -755,3 +755,5 @@ body {
 .file-drop.drag-over { border-color:#38bdf8; background:#142b3c; }
 .file-drop p { margin:12px 0; }
 .file-drop progress { width:100%; accent-color:#10b981; }
+
+#choose-files[hidden] { display: none; }

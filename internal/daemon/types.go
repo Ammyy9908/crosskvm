@@ -77,6 +77,7 @@ func FromDiscoveryPeer(p discovery.Peer) PeerInfo {
 
 // StatusResponse encapsulates current KVM and connection state.
 type StatusResponse struct {
+	EdgeDragAvailable       bool               `json:"edgeDragAvailable"`
 	FileTransferAvailable   bool               `json:"fileTransferAvailable"`
 	ImageClipboardAvailable bool               `json:"imageClipboardAvailable"`
 	ClipboardAvailable      bool               `json:"clipboardAvailable"`
